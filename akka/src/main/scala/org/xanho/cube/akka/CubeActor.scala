@@ -4,11 +4,13 @@ import akka.actor.Actor
 import org.xanho.cube.akka.CubeActor.Messages.{DreamingState, InteractiveState}
 import org.xanho.cube.core.{Cube, DreamingCube, InteractiveCube, Message}
 
-import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
 import scala.util.Success
 
 class CubeActor extends Actor {
+
+  import context.dispatcher
 
   private var cube: Cube =
     ???
@@ -46,13 +48,15 @@ class CubeActor extends Actor {
 
       case Messages.TerminateGracefully =>
         cube = cube.interact
-        saveCube()
-          .onComplete {
-            case Success(_) =>
-              sender() ! Messages.Ok
-            case _ =>
-              sender() ! Messages.NotOk
-          }
+        val f =
+          saveCube()
+            .andThen {
+              case Success(_) =>
+                sender() ! Messages.Ok
+              case _ =>
+                sender() ! Messages.NotOk
+            }
+        Await.ready(f, Duration.Inf)
     }
   }
 

@@ -2,6 +2,7 @@ package org.xanho.cube.akka
 
 import akka.actor.{Actor, ActorRef, Props}
 import akka.pattern.ask
+import akka.util.Timeout
 import org.xanho.cube.core.Message
 
 import scala.collection.mutable
@@ -10,6 +11,8 @@ import scala.concurrent.{Await, Future}
 import scala.util.Success
 
 class CubeCluster extends Actor {
+
+  import context.dispatcher
 
   private val cubeActors: mutable.Map[String, ActorRef] =
     mutable.Map.empty
@@ -55,6 +58,9 @@ class CubeCluster extends Actor {
         )
 
       case Messages.Status =>
+        import scala.concurrent.duration._
+        implicit val askTimeout =
+          Timeout(10.seconds)
         Future.traverse(cubeActors)(kv => (kv._2 ? Messages.Status) map (kv._1 -> _))
           .onComplete {
             case Success(status) =>
@@ -74,11 +80,15 @@ class CubeCluster extends Actor {
   private def loadCube(cubeId: String): ActorRef =
     cubeActors.getOrElseUpdate(cubeId, context.actorOf(Props[CubeActor], cubeId))
 
-  private def unloadCube(cubeId: String): Future[_] =
+  private def unloadCube(cubeId: String): Future[_] = {
+    import scala.concurrent.duration._
+    implicit val askTimeout =
+      Timeout(30.seconds)
     cubeActors.get(cubeId)
       .map(_ ? Messages.TerminateGracefully)
       .map(_.andThen { case _ => cubeActors.remove(cubeId) })
       .getOrElse(Future())
+  }
 }
 
 object CubeCluster {
