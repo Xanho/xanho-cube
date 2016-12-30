@@ -23,7 +23,8 @@ lazy val cubeCore =
     .settings(
       name := "cube-core",
       libraryDependencies ++=
-        Dependencies.graph
+        Dependencies.graph ++
+        Dependencies.openNlp
     )
 
 lazy val cubeAkka =

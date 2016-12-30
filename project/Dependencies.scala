@@ -51,4 +51,10 @@ object Dependencies {
       "com.seancheatham" %% "graph-memory-adapter" % "0.0.2-SNAPSHOT"
     )
 
+  val openNlp =
+    Seq(
+      "org.apache.opennlp" % "opennlp" % "1.6.0",
+      "org.apache.opennlp" % "opennlp-tools" % "1.6.0"
+    )
+
 }

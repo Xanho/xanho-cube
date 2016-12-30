@@ -37,7 +37,7 @@ class CubeActor extends Actor {
 
   def receive = {
     {
-      case message@Message(text, source, _, timestamp) =>
+      case message@Message(_, text, source, _, timestamp) =>
         val (newCube, response) =
           cube.interact.receive(message)
         cube = newCube

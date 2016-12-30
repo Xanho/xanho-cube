@@ -6,7 +6,7 @@ import org.xanho.cube.core.Message
 class MessageHandler extends Actor {
 
   def receive = {
-    case message@Message(_, _, destination, _) =>
+    case message@Message(_, _, _, destination, _) =>
       if(isUser(destination))
         sendToUser(message)
       else

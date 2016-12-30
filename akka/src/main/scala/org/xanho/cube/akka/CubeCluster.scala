@@ -20,7 +20,7 @@ class CubeCluster extends Actor {
   def receive = {
     import CubeCluster.Messages._
     {
-      case message@Message(_, _, destination, _) =>
+      case message@Message(_, _, _, destination, _) =>
         if (isUser(destination))
           sendToUser(message)
         else
