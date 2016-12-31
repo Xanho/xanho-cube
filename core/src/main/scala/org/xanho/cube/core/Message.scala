@@ -3,8 +3,7 @@ package org.xanho.cube.core
 import play.api.libs.json.{Json, OFormat}
 
 
-case class Message(id: String,
-                   text: String,
+case class Message(text: String,
                    sourceId: String,
                    destinationId: String,
                    timestamp: Long)

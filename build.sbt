@@ -14,7 +14,18 @@ lazy val root =
     .in(file("."))
     .settings(commonSettings: _*)
     .settings(packagedArtifacts := Map.empty)
-    .aggregate(cubeCore, cubeAkka)
+    .aggregate(utility, cubeCore, cubeAkka)
+
+lazy val utility =
+  project
+    .in(file("utility"))
+    .settings(commonSettings: _*)
+    .settings(
+      name := "cube-utility",
+      libraryDependencies ++=
+        Dependencies.googleCloudStorage ++
+        Dependencies.firebase
+    )
 
 lazy val cubeCore =
   project
@@ -36,4 +47,4 @@ lazy val cubeAkka =
       libraryDependencies ++=
         Dependencies.akka
     )
-    .dependsOn(cubeCore)
+    .dependsOn(cubeCore, utility)

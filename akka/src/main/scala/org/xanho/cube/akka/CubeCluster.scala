@@ -3,14 +3,13 @@ package org.xanho.cube.akka
 import akka.actor.{Actor, ActorRef, Props}
 import akka.pattern.ask
 import akka.util.Timeout
-import org.xanho.cube.core.Message
 
 import scala.collection.mutable
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
 import scala.util.Success
 
-class CubeCluster extends Actor {
+class CubeCluster(id: String) extends Actor {
 
   import context.dispatcher
 
@@ -20,14 +19,6 @@ class CubeCluster extends Actor {
   def receive = {
     import CubeCluster.Messages._
     {
-      case message@Message(_, _, _, destination, _) =>
-        if (isUser(destination))
-          sendToUser(message)
-        else
-          cubeActors.get(message.destinationId)
-            .fold(
-              sender() ! Messages.NotFound(message.destinationId)
-            )(_ forward message)
 
       case Register(cubeIds) =>
         cubeIds.foreach(loadCube)
@@ -58,9 +49,6 @@ class CubeCluster extends Actor {
         )
 
       case Messages.Status =>
-        import scala.concurrent.duration._
-        implicit val askTimeout =
-          Timeout(10.seconds)
         Future.traverse(cubeActors)(kv => (kv._2 ? Messages.Status) map (kv._1 -> _))
           .onComplete {
             case Success(status) =>
@@ -71,27 +59,31 @@ class CubeCluster extends Actor {
     }
   }
 
-  private def sendToUser(message: Message): Unit =
-    ???
-
-  private def isUser(id: String): Boolean =
-    ???
-
   private def loadCube(cubeId: String): ActorRef =
-    cubeActors.getOrElseUpdate(cubeId, context.actorOf(Props[CubeActor], cubeId))
+    cubeActors.getOrElseUpdate(
+      cubeId,
+      context.actorOf(CubeActor.props(cubeId), cubeId)
+    )
+
+  override def postStop(): Unit =
+    Future.traverse(cubeActors.keysIterator)(unloadCube)
 
   private def unloadCube(cubeId: String): Future[_] = {
+    import akka.pattern.gracefulStop
+
     import scala.concurrent.duration._
-    implicit val askTimeout =
-      Timeout(30.seconds)
+
     cubeActors.get(cubeId)
-      .map(_ ? Messages.TerminateGracefully)
+      .map(gracefulStop(_, 30.seconds))
       .map(_.andThen { case _ => cubeActors.remove(cubeId) })
       .getOrElse(Future())
   }
 }
 
 object CubeCluster {
+
+  def props(id: String): Props =
+    Props(new CubeCluster(id))
 
   object Messages {
 

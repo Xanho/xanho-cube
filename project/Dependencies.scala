@@ -57,4 +57,14 @@ object Dependencies {
       "org.apache.opennlp" % "opennlp-tools" % "1.6.0"
     )
 
+  val googleCloudStorage =
+    Seq(
+      "com.google.cloud" % "google-cloud-storage" % "0.8.0-beta"
+    )
+
+  val firebase =
+    Seq(
+      "com.google.firebase" % "firebase-admin" % "4.0.3"
+    )
+
 }
