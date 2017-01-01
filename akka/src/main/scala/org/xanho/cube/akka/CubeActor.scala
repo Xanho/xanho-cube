@@ -1,23 +1,22 @@
 package org.xanho.cube.akka
 
-import akka.actor.{Actor, Props}
+import akka.actor.{Actor, ActorLogging, Props}
 import com.seancheatham.graph.adapters.memory.MutableGraph
 import org.xanho.cube.core.{Cube, Message}
+import org.xanho.utility.FutureUtility.FutureHelper
 import org.xanho.utility.data.{Buckets, DocumentStorage, FirebaseDatabase}
 import play.api.libs.json.{JsObject, JsValue, Json}
 
+import scala.concurrent.Future
 import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
 import scala.util.Success
 
 /**
   * An Actor which maintains a specific Cube.  This Actor is responsible for cube messaging and cube dreaming.
-  * If a message has not be received for X number of seconds, the Cube switches into a dream state where it
-  * will do its "thinking"
   *
   * @param cubeId The ID of the cube to instantiate
   */
-class CubeActor(cubeId: String) extends Actor {
+class CubeActor(cubeId: String) extends Actor with ActorLogging {
 
   import context.dispatcher
 
@@ -29,19 +28,26 @@ class CubeActor(cubeId: String) extends Actor {
     Cube(
       cubeId,
       Seq.empty,
-      Await.result(
-        DocumentStorage.default
-          .get(Buckets.CUBES, cubeId, "graph")
-          .map(_.get.as[MutableGraph](MutableGraph.read())),
-        defaultTimeout
-      ),
-      Await.result(
-        DocumentStorage.default
-          .get(Buckets.CUBES, cubeId, "data")
-          .map(_.get.as[Map[String, JsValue]]),
-        defaultTimeout
-      )
+      DocumentStorage.default
+        .get(Buckets.CUBES, cubeId, "graph")
+        .map(_.fold(new MutableGraph())(_.as[MutableGraph](MutableGraph.read())))
+        .await,
+      DocumentStorage.default
+        .get(Buckets.CUBES, cubeId, "data")
+        .map(_.get.as[Map[String, JsValue]])
+        .await
     )((dest, text) => sendMessage(dest, text))
+
+  /**
+    * The ID of the listener attached to this Cube's message storage in the database
+    */
+  private var messageListenerId: Option[String] =
+    None
+
+  /**
+    * Attach the message listener right away
+    */
+  attachMessageListener()
 
   /**
     * Every 5 minutes, save the cube
@@ -49,9 +55,9 @@ class CubeActor(cubeId: String) extends Actor {
   context.system.scheduler.schedule(5.minutes, 5.minutes)(self ! CubeActor.Messages.SaveData)
 
   /**
-    * Attach the message listener right away
+    * Send a test message every 20 seconds
     */
-  context.system.scheduler.scheduleOnce(0.minutes)(attachMessageListener())
+  context.system.scheduler.schedule(5.seconds, 20.seconds)(sendMessage(cube.ownerId, "Test Message"))
 
   /**
     * Interprets the following messages:
@@ -64,35 +70,33 @@ class CubeActor(cubeId: String) extends Actor {
     *
     * @return
     */
-  def receive: PartialFunction[Any, Unit] = {
+  def receive: Receive = {
     case message: Message =>
+      val isSelf =
+        message.sourceId == cubeId
+      log.info(s"Received${if (isSelf) " (self)" else ""} message: $message")
       cube = cube receive message
 
     case Messages.Status =>
+      log.info("Received status request")
       sender() ! Messages.Ok
 
     case CubeActor.Messages.SaveData =>
-      Await.result(saveCube(), defaultTimeout)
+      log.info("Received save data request")
+      saveCube().await
   }
 
   override def postStop(): Unit = {
     detachMessageListener()
-    val f =
-      saveCube()
-        .andThen {
-          case Success(_) =>
-            sender() ! Messages.Ok
-          case _ =>
-            sender() ! Messages.NotOk
-        }
-    Await.ready(f, Duration.Inf)
+    saveCube()
+      .andThen {
+        case Success(_) =>
+          sender() ! Messages.Ok
+        case _ =>
+          sender() ! Messages.NotOk
+      }
+      .await(Duration.Inf)
   }
-
-  /**
-    * The ID of the listener attached to this Cube's message storage in the database
-    */
-  private var messageListenerId: Option[String] =
-    None
 
   private def attachMessageListener() =
     messageListenerId =
@@ -129,18 +133,30 @@ class CubeActor(cubeId: String) extends Actor {
       )
     )
 
+  /**
+    * Sends a message from this cube to the destination, retrying X number of times in case of failure
+    *
+    * @param destination The destination ID (user or Cube)
+    * @param text        The text to send
+    * @param retries     The number of retries left before throwing an exception
+    * @return a Future result
+    */
   private def sendMessage(destination: String,
                           text: String,
-                          retries: Int = 3): Unit =
-    DocumentStorage.default.append(Buckets.CUBES, "messages")(
-      Json.toJson(Message(text, cubeId, destination, System.currentTimeMillis()))
-    ) onFailure {
+                          retries: Int = 3): Future[_] = {
+    val f =
+      DocumentStorage.default.append(Buckets.CUBES, cubeId, "messages")(
+        Json.toJson(Message(text, cubeId, destination, System.currentTimeMillis()))
+      )
+    f onFailure {
       case t =>
         if (retries <= 0)
           throw t
         else
           sendMessage(destination, text, retries - 1)
     }
+    f
+  }
 }
 
 object CubeActor {

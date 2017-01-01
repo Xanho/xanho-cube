@@ -167,7 +167,6 @@ object FirebaseDatabase extends DocumentStorage {
       case v =>
         reference.setValue(jsonToAny(v))
     })
-
       .addOnSuccessListener(new OnSuccessListener[Void] {
         def onSuccess(tResult: Void): Unit =
           p success Unit

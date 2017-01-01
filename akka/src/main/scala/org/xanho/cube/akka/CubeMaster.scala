@@ -1,75 +1,75 @@
 package org.xanho.cube.akka
 
-import akka.actor.{Actor, ActorRef}
+import java.util.UUID
+
+import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
 import akka.pattern.ask
 import com.seancheatham.graph.adapters.memory.MutableGraph
+import com.typesafe.scalalogging.LazyLogging
 import org.xanho.cube.core.Message
+import org.xanho.utility.FutureUtility.FutureHelper
 import org.xanho.utility.data.{Buckets, DocumentStorage}
-import play.api.libs.json.{JsValue, Json}
+import play.api.libs.json.Json
 
 import scala.collection.mutable
-import scala.concurrent.{Await, Future}
-import scala.util.Random
+import scala.concurrent.Future
+import scala.concurrent.duration._
 
 /**
   * The master cube actor, which maintains references to Cube Cluster actors.  The master also
   * holds a directory of every Cube in the system, mapping them to the corresponding clusters.
   * The master is also responsible for constructing new cubes and assigning them to clusters
   */
-class CubeMaster extends Actor {
+class CubeMaster extends Actor with ActorLogging {
 
   import context.dispatcher
 
   /**
-    * A mapping of cluster actors by ID
+    * A set of cluster IDs
     */
-  private val clusterActors: mutable.Map[String, ActorRef] =
-    mutable.Map.empty
+  private val clusters =
+    mutable.Map.empty[String, (Int, Set[String])]
 
   /**
-    * A mapping from cluster actor ID to a list of its active cube IDs
+    * A queue of cubes which have been orphaned, and need a new parent
     */
-  private val cubeClusterAssignments: mutable.Map[String, Seq[String]] =
-    mutable.Map.empty
+  private val orphanedCubes =
+    mutable.Queue.empty[String]
+
+  /**
+    * Every 5 seconds, assign any orphaned cubes
+    */
+  context.system.scheduler.schedule(5.seconds, 5.seconds)(
+    if (orphanedCubes.nonEmpty)
+      self ! CubeMaster.Messages.AssignOrphans
+  )
 
   /**
     * Receive requests to register clusters, unregister clusters, and create new Cubes
     */
-  def receive: PartialFunction[Any, Unit] = {
+  def receive: Receive = {
 
-    case CubeMaster.Messages.RegisterCluster(clusterId) =>
-      clusterActors += (clusterId -> sender())
+    case CubeMaster.Messages.RegisterCluster(clusterId, maximumCapacity) =>
+      log.info(s"Received register request with ID $clusterId from ${sender()}")
+      clusters.update(clusterId, (maximumCapacity, Set.empty[String]))
+      sender() ! Messages.Ok
       balanceClusters()
 
     case CubeMaster.Messages.UnregisterCluster(clusterId) =>
-      val orphans =
-        cubeClusterAssignments(clusterId)
-      clusterActors -= clusterId
-      cubeClusterAssignments -= clusterId
-      val remainingActors =
-        clusterActors.keys.toVector
+      log.info(s"Received unregister request with ID $clusterId from ${sender()}")
+      orphanedCubes.enqueue(clusters(clusterId)._2.toSeq: _*)
+      clusters.remove(clusterId)
 
-      Await.result(
-        Future.sequence(
-          remainingActors
-            .zipWithIndex
-            .map {
-              case (actorId, index) =>
-                val orphanSlice =
-                  orphans.slice(
-                    orphans.size / remainingActors.size * index,
-                    orphans.size / remainingActors.size * (index + 1)
-                  )
-                assignToCluster(actorId, orphanSlice)
-            }
-        ),
-        defaultTimeout
-      )
-    case CubeMaster.Messages.CreateCube =>
+    case CubeMaster.Messages.CreateCube(ownerId) =>
+      log.info(s"Received create cube request from ${sender()}")
       val cubeId =
-        createCube()
-      assignToCluster(randomCluster(), Vector(cubeId))
-        .onSuccess { case _ => sender() ! cubeId }
+        createCube(ownerId)
+      orphanedCubes.enqueue(cubeId)
+      sender() ! cubeId
+
+    case CubeMaster.Messages.AssignOrphans =>
+      log.info(s"Received assign orphans from ${sender()}")
+      assignOrphans().await
 
   }
 
@@ -77,7 +77,7 @@ class CubeMaster extends Actor {
     * Shut down each of the clusters
     */
   override def postStop(): Unit =
-    Future.traverse(clusterActors.keysIterator)(unloadCluster)
+    Future.traverse(clusters.keys)(unloadCluster).await
 
   /**
     * Unload the given cluster ID, instructing it to shut down each of its
@@ -88,21 +88,37 @@ class CubeMaster extends Actor {
   private def unloadCluster(clusterId: String): Future[_] = {
     import akka.pattern.gracefulStop
 
-    import scala.concurrent.duration._
-
-    clusterActors.get(clusterId)
-      .map(gracefulStop(_, 30.seconds))
-      .map(
-        _.flatMap {
+    if (clusters contains clusterId)
+      gracefulStop(clusterRef(clusterId), 30.seconds)
+        .map {
           _ =>
-            clusterActors.remove(clusterId)
-            val orphanedCubes =
-              cubeClusterAssignments(clusterId)
-            assign(orphanedCubes)
+            orphanedCubes.enqueue(clusters(clusterId)._2.toSeq: _*)
+            clusters.remove(clusterId)
         }
-      )
-      .getOrElse(Future())
+    else
+      Future.successful()
   }
+
+  /**
+    * Tells a Cluster a message
+    *
+    * @param clusterId The ID of the cluster
+    * @param message   The message to send
+    */
+  private def tellCluster(clusterId: String,
+                          message: Any): Unit =
+    clusterRef(clusterId) ! message
+
+  /**
+    * Asks a cluster a question, returning a future with the answer
+    *
+    * @param clusterId The ID of the cluster
+    * @param question  The message to send
+    * @return A Future with the answer
+    */
+  private def askCluster(clusterId: String,
+                         question: Any): Future[Any] =
+    clusterRef(clusterId) ? question
 
   /**
     * Assigns the given cube IDs to the given cluster.  Updates the cubeClusterAssignments map.
@@ -112,99 +128,60 @@ class CubeMaster extends Actor {
     * @return A future operation which assigns the given IDs
     */
   private def assignToCluster(clusterId: String,
-                              cubeIds: Seq[String]): Future[_] =
-    (clusterActors(clusterId) ? CubeCluster.Messages.Register(cubeIds))
+                              cubeIds: Set[String]): Future[_] = {
+    log.info(s"Assigning cubes to cluster $clusterId: $cubeIds")
+    val (max, currentCubeIds) =
+      clusters(clusterId)
+    askCluster(clusterId, CubeCluster.Messages.Register(cubeIds))
       .map(
         _ =>
-          cubeClusterAssignments
-            .update(clusterId, (cubeClusterAssignments(clusterId) ++ cubeIds).distinct)
+          clusters
+            .update(clusterId, (max, currentCubeIds ++ cubeIds))
       )
-
-  /**
-    * Assigns the given cube IDs to arbitrary clusters
-    *
-    * @param cubeIds The cube IDs to assign
-    * @return A future operation which assigns the given IDs
-    */
-  private def assign(cubeIds: Seq[String]): Future[_] = {
-
-    val targetSize: Int =
-      cubeClusterAssignments.values.map(_.size).sum / clusterActors.size
-
-    val queue =
-      mutable.Queue(cubeIds: _*)
-
-    Future.traverse(
-      cubeClusterAssignments
-        .toSeq
-        .sortBy(_._2.size)) {
-      kv =>
-        val toUnorphan =
-          (0 until (targetSize - kv._2.size).max(0))
-            .flatMap(_ => if (queue.nonEmpty) Some(queue.dequeue()) else None)
-
-        assignToCluster(kv._1, toUnorphan)
-    }
   }
 
   /**
-    * Selects a random active cluster
+    * Assigns all currently orphaned cubes to clusters, balancing in the process
     *
-    * @return the ID of the random cluster
+    * @return a Future
     */
-  private def randomCluster() =
-    clusterActors.keys.toSeq(Random.nextInt(clusterActors.size))
+  private def assignOrphans(): Future[_] =
+    if (clusters.nonEmpty)
+      Future.traverse(
+        clusters
+          .toSeq
+          .sortBy(_._2._2.size)
+          .map {
+            case (clusterId, (targetSize, cubeIds)) =>
+              clusterId ->
+                (0 until (targetSize - cubeIds.size).max(0).min(orphanedCubes.size))
+                  .map(_ => orphanedCubes.dequeue())
+                  .toSet
+          }
+      )((assignToCluster _).tupled)
+    else {
+      log.error("No clusters available, re-queueing orphans")
+      Future.successful()
+    }
 
   /**
     * Balances out the clusters, attempting to assign an equal number of cubes to each
     */
   private def balanceClusters(): Unit = {
+    clusters
+      .foreach {
+        case (clusterId, (targetSize, cubeIds)) =>
+          val toOrphan =
+            cubeIds.drop(targetSize)
+          if (toOrphan.nonEmpty)
+            askCluster(
+              clusterId,
+              CubeCluster.Messages.Unregister(toOrphan)
+            ).await
+          orphanedCubes.enqueue(toOrphan.toSeq: _*)
+      }
 
-    val targetSize: Int =
-      cubeClusterAssignments.values.map(_.size).sum / clusterActors.size
-
-    val orphans =
-      mutable.Queue(
-        cubeClusterAssignments
-          .flatMap {
-            case (clusterId, cubeIds) =>
-              val toOrphan =
-                cubeIds.drop(targetSize)
-              if (toOrphan.nonEmpty)
-                Await.result(
-                  clusterActors(clusterId) ?
-                    CubeCluster.Messages.Unregister(toOrphan), defaultTimeout
-                )
-              toOrphan
-          }
-          .toVector: _*
-      )
-
-    Await.result(
-      Future.sequence(
-        cubeClusterAssignments
-          .toSeq
-          .sortBy(_._2.size)
-          .map {
-            case (clusterId, cubeIds) =>
-              val toUnorphan =
-                (0 until (targetSize - cubeIds.size).max(0))
-                  .map(_ => orphans.dequeue())
-
-              assignToCluster(clusterId, toUnorphan)
-          }
-      ),
-      defaultTimeout
-    )
-
-    Await.result(
-      Future.sequence(
-        orphans.toVector
-          .map(cubeId => assignToCluster(randomCluster(), Vector(cubeId)))
-      ),
-      defaultTimeout
-    )
-
+    self ! CubeMaster.Messages.AssignOrphans
   }
 
   /**
@@ -212,29 +189,51 @@ class CubeMaster extends Actor {
     *
     * @return The ID of the new cube
     */
-  private def createCube(): String =
-    Await.result(
-      DocumentStorage.default
-        .append(Buckets.CUBES)(
-          Json.obj(
-            "messages" -> Seq.empty[Message],
-            "graph" -> new MutableGraph()(),
-            "data" -> Map.empty[String, JsValue]
+  private def createCube(ownerId: String): String = {
+    val id =
+      UUID.randomUUID().toString
+    DocumentStorage.default
+      .write(Buckets.CUBES, id)(
+        Json.obj(
+          "messages" -> Seq.empty[Message],
+          "graph" -> new MutableGraph()(),
+          "data" -> Json.obj(
+            "creationDate" -> System.currentTimeMillis(),
+            "ownerId" -> ownerId
           )
-        ),
-      defaultTimeout
-    )
+        )
+      )
+      .map(_ => id)
+      .await
+  }
+
+  private def clusterRef(clusterId: String) =
+    context.actorSelection(
+      clusterPath(clusterId)
+    ).resolveOne()
+      .await
 }
 
-object CubeMaster {
+object CubeMaster extends LazyLogging {
+
+  def initialize(): Unit = {
+    logger.info("Starting a Cube Master actor")
+    val system =
+      ActorSystem("xanho")
+    val actor =
+      system.actorOf(Props[CubeMaster], "cube-master")
+  }
 
   object Messages {
 
-    case class RegisterCluster(clusterId: String)
+    case class RegisterCluster(clusterId: String,
+                               maximumCapacity: Int)
 
     case class UnregisterCluster(clusterId: String)
 
-    case object CreateCube
+    case class CreateCube(ownerId: String)
+
+    case object AssignOrphans
 
   }
 

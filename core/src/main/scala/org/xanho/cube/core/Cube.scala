@@ -4,6 +4,7 @@ import com.seancheatham.graph.Graph
 import com.seancheatham.graph.adapters.memory.MutableGraph
 import play.api.libs.json.JsValue
 
+import scala.concurrent.Future
 
 /**
   * The basic abstraction of a Xanho Cube.  A Cube represents a mini-computer which has an ID, stores a series
@@ -18,7 +19,7 @@ import play.api.libs.json.JsValue
 case class Cube(id: String,
                 messages: Seq[Message],
                 graph: Graph,
-                data: Map[String, JsValue])(sendMessage: (String, String) => Unit) {
+                data: Map[String, JsValue])(sendMessage: (String, String) => Future[_]) {
 
   /**
     * Runs a "dream" cycle iteration, which produces a new Cube with an updated graph, as well as a sequence of tuples
@@ -30,11 +31,25 @@ case class Cube(id: String,
   /**
     * Receives the provided message and adds it to this Cube's message list
     *
+    * Also sends a response back, if possible
+    *
     * @param message The inbound [[org.xanho.cube.core.Message]]
     * @return an updated Cube
     */
-  def receive(message: Message): Cube =
-    copy(messages = messages :+ message)(sendMessage)
+  def receive(message: Message): Cube = {
+    val newCube =
+      copy(messages = messages :+ message)(sendMessage)
+    if(message.sourceId != id)
+      sendMessage(message.sourceId, s"Hello ${message.sourceId}")
+    newCube
+  }
+
+  /**
+    * Get the ID of the owner of this cube
+    * @return The owner's ID
+    */
+  def ownerId: String =
+    data("ownerId").as[String]
 
 }
 
@@ -42,7 +57,7 @@ object Cube {
 
   import play.api.libs.json._
 
-  def read(sendMessage: (String, String) => Unit): Reads[Cube] =
+  def read(sendMessage: (String, String) => Future[_]): Reads[Cube] =
     Reads[Cube](
       v =>
         JsSuccess(

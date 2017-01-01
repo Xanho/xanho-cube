@@ -45,6 +45,7 @@ lazy val cubeAkka =
     .settings(
       name := "cube-akka",
       libraryDependencies ++=
-        Dependencies.akka
+        Dependencies.akka ++
+        Dependencies.akkaHttp
     )
     .dependsOn(cubeCore, utility)

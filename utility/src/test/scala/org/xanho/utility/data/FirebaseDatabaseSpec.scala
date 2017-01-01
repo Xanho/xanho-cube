@@ -1,7 +1,7 @@
 package org.xanho.utility.data
 
 import org.scalatest.WordSpec
-import play.api.libs.json.{JsObject, JsString, JsValue, Json}
+import play.api.libs.json.{JsString, JsValue, Json}
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
@@ -16,7 +16,7 @@ class FirebaseDatabaseSpec extends WordSpec {
       "test_bucket_12435624572457625"
 
     "write a single value" in {
-        FirebaseDatabase.write(testBucketName, "item")(Json.obj("foo" -> 645, "bar" -> Seq.empty[String])).await
+      FirebaseDatabase.write(testBucketName, "item")(Json.obj("foo" -> 645, "bar" -> Seq.empty[String])).await
 
       assert(true)
     }

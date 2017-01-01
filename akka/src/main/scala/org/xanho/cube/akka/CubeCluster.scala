@@ -1,64 +1,99 @@
 package org.xanho.cube.akka
 
-import akka.actor.{Actor, ActorRef, Props}
+import java.util.UUID
+
+import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
 import akka.pattern.ask
-import akka.util.Timeout
+import com.typesafe.scalalogging.LazyLogging
+import org.xanho.utility.FutureUtility.FutureHelper
 
 import scala.collection.mutable
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.{Duration, _}
 import scala.concurrent.{Await, Future}
 import scala.util.Success
 
-class CubeCluster(id: String) extends Actor {
+/**
+  * A Cube Cluster is a collection of Cube Actors operating on a single host.  The Cluster is responsible for
+  * creating and destroying cube actors as instructed by the Cube Master
+  *
+  * @param id              The ID of the cluster
+  * @param maximumCapacity The maximum number of cubes which can run in this cluster (generally limited by hardware)
+  */
+class CubeCluster(id: String,
+                  maximumCapacity: Int) extends Actor with ActorLogging {
 
   import context.dispatcher
 
-  private val cubeActors: mutable.Map[String, ActorRef] =
-    mutable.Map.empty
+  /**
+    * A reference to the Cube Master
+    */
+  private val cubeMaster: ActorRef =
+    Await.result(context.actorSelection(masterPath).resolveOne(), defaultTimeout)
 
-  def receive = {
-    import CubeCluster.Messages._
-    {
+  /**
+    * A mapping from actor ID to Cube Actor reference
+    */
+  private val cubeActors =
+    mutable.Map.empty[String, ActorRef]
 
-      case Register(cubeIds) =>
-        cubeIds.foreach(loadCube)
-        sender() ! Messages.Ok
-
-      case Unregister(cubeIds) =>
-        Await.ready(
-          Future.traverse(cubeIds)(unloadCube)
-            .andThen {
-              case Success(_) =>
-                sender() ! Messages.Ok
-              case _ =>
-                sender() ! Messages.NotOk
-            },
-          Duration.Inf
-        )
-
-      case UnregisterAll =>
-        Await.ready(
-          Future.traverse(cubeActors.keysIterator)(unloadCube)
-            .andThen {
-              case Success(_) =>
-                sender() ! Messages.Ok
-              case _ =>
-                sender() ! Messages.NotOk
-            },
-          Duration.Inf
-        )
-
-      case Messages.Status =>
-        Future.traverse(cubeActors)(kv => (kv._2 ? Messages.Status) map (kv._1 -> _))
-          .onComplete {
-            case Success(status) =>
-              sender() ! status.toMap
-            case _ =>
-              Messages.NotOk
-          }
-    }
+  /**
+    * Register this cluster right away, erroring out if it can't
+    */
+  Await.result(
+    cubeMaster ? CubeMaster.Messages.RegisterCluster(id, maximumCapacity),
+    defaultTimeout
+  ) match {
+    case Messages.Ok =>
+    case _ =>
+      throw new IllegalStateException("Unable to register with master")
   }
 
+  def receive: Receive = {
+    case CubeCluster.Messages.Register(cubeIds) =>
+      log.info(s"Received cube registration request for cube IDs: $cubeIds")
+      cubeIds.foreach(loadCube)
+      sender() ! Messages.Ok
+
+    case CubeCluster.Messages.Unregister(cubeIds) =>
+      log.info(s"Received cube unregister request for cube IDs: $cubeIds")
+      Await.ready(
+        Future.traverse(cubeIds)(unloadCube)
+          .andThen {
+            case Success(_) =>
+              sender() ! Messages.Ok
+            case _ =>
+              sender() ! Messages.NotOk
+          },
+        Duration.Inf
+      )
+
+    case CubeCluster.Messages.UnregisterAll =>
+      log.info("Received cube unregister all request")
+      Await.ready(
+        Future.traverse(cubeActors.keysIterator)(unloadCube)
+          .andThen {
+            case Success(_) =>
+              sender() ! Messages.Ok
+            case _ =>
+              sender() ! Messages.NotOk
+          },
+        Duration.Inf
+      )
+
+    case Messages.Status =>
+      log.info("Received status request")
+      Future.traverse(cubeActors)(kv => kv._2 ? Messages.Status filter (_ == Messages.Ok))
+        .await
+      sender() ! CubeCluster.Messages.Status(cubeActors.keySet.toSet)
+  }
+
+  /**
+    * Load a cube into this cluster, instantiating an actor as necessary.
+    * If the cube ID already exists in this cluster, return its reference
+    *
+    * @param cubeId The ID of the cube
+    * @return A reference to the actor
+    */
   private def loadCube(cubeId: String): ActorRef =
     cubeActors.getOrElseUpdate(
       cubeId,
@@ -68,30 +103,47 @@ class CubeCluster(id: String) extends Actor {
   override def postStop(): Unit =
     Future.traverse(cubeActors.keysIterator)(unloadCube)
 
+  /**
+    * Unload a cube from this actor by shutting down the cube actor and removing it from the mapping
+    *
+    * @param cubeId The ID of the cube to unload
+    * @return A future
+    */
   private def unloadCube(cubeId: String): Future[_] = {
     import akka.pattern.gracefulStop
 
-    import scala.concurrent.duration._
-
-    cubeActors.get(cubeId)
+    cubeActors
+      .get(cubeId)
       .map(gracefulStop(_, 30.seconds))
       .map(_.andThen { case _ => cubeActors.remove(cubeId) })
-      .getOrElse(Future())
+      .getOrElse(Future.successful())
   }
 }
 
-object CubeCluster {
+object CubeCluster extends LazyLogging {
 
-  def props(id: String): Props =
-    Props(new CubeCluster(id))
+  def props(id: String,
+            maximumCapacity: Int): Props =
+    Props(new CubeCluster(id, maximumCapacity))
+
+  def initialize(id: String = UUID.randomUUID().toString,
+                 maximumCapacity: Int = 20): Unit = {
+    logger.info(s"Starting a Cube Cluster actor with ID $id")
+    val system =
+      ActorSystem("xanho")
+    val actor =
+      system.actorOf(props(id, maximumCapacity), s"$cubeClusterPrefix$id")
+  }
 
   object Messages {
 
-    case class Register(cubeIds: Seq[String])
+    case class Register(cubeIds: Set[String])
 
-    case class Unregister(cubeIds: Seq[String])
+    case class Unregister(cubeIds: Set[String])
 
     case object UnregisterAll
+
+    case class Status(cubeIds: Set[String])
 
   }
 
