@@ -86,6 +86,9 @@ class CubeActor(cubeId: String) extends Actor with ActorLogging {
       saveCube().await
   }
 
+  /**
+    * Detach the message listener, save the cube, and respond with an Ok
+    */
   override def postStop(): Unit = {
     detachMessageListener()
     saveCube()
@@ -98,17 +101,26 @@ class CubeActor(cubeId: String) extends Actor with ActorLogging {
       .await(Duration.Inf)
   }
 
+  /**
+    * Attach a listener to this cube's message list in the database.
+    * Upon each new message, self-send it to this Actor
+    */
   private def attachMessageListener() =
     messageListenerId =
       DocumentStorage.default match {
         case FirebaseDatabase =>
           Some(
-            FirebaseDatabase.watchCollection("cubes", cubeId, "messages")((v: JsValue) => self ! v.as[Message])
+            FirebaseDatabase.watchCollection("cubes", cubeId, "messages")(
+              (v: JsValue) => self ! v.as[Message]
+            )
           )
         case _ =>
           None
       }
 
+  /**
+    * Detach the message listener
+    */
   private def detachMessageListener() =
     messageListenerId
       .foreach(id =>
@@ -167,16 +179,6 @@ object CubeActor {
   object Messages {
 
     case object SaveData
-
-    case object StartDreaming
-
-    case object StartInteracting
-
-    sealed trait CubeActorState
-
-    case class InteractiveState(cubeId: String) extends CubeActorState
-
-    case class DreamingState(cubeId: String) extends CubeActorState
 
   }
 

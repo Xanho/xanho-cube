@@ -5,18 +5,23 @@ import java.util.UUID
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.Http.ServerBinding
+import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
+import akka.http.scaladsl.server.RouteResult.route2HandlerFlow
 import akka.pattern.ask
 import akka.stream.ActorMaterializer
+import de.heikoseeberger.akkahttpplayjson.PlayJsonSupport._
+import org.xanho.cube.akka.api.{authenticator, models, realm}
+import play.api.libs.json.{JsObject, JsValue, Json}
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
-import akka.http.scaladsl.server.RouteResult.route2HandlerFlow
 
 /**
   * An Actor which serves as an API/HTTP Server, which enables an HTTP entrypoint into the system
-  * @param id The unique ID of this API Server
+  *
+  * @param id   The unique ID of this API Server
   * @param host The host to bind to
   * @param port The port to bind to
   */
@@ -41,14 +46,46 @@ class ApiActor(id: String,
   /**
     * The routes for this API
     */
-  private val routes: Route =
-    path("cubes")(
-      post(
-        onSuccess(
-          cubeMaster ? CubeMaster.Messages.CreateCube(testAccountId) map (_.asInstanceOf[String])
-        )(complete(_))
-      )
-    )
+  private val routes: Route = {
+
+    val userRoutes =
+      authenticateOAuth2Async(realm, authenticator) {
+        case (token: String, userId: String, userEmail: String) =>
+          path("users" / Segment)(id =>
+            if (userId != id)
+              complete(StatusCodes.Unauthorized)
+            else
+              get(
+                onSuccess(models.User.get(userId))(
+                  _.fold(complete(StatusCodes.NotFound))(complete(_))
+                )
+              ) ~
+                post(
+                  entity(as[Map[String, JsValue]].map(JsObject(_).as[models.User]))(
+                    user =>
+                      onSuccess(
+                        models.User.write(userId)(Json.toJson(user))
+                          .flatMap(_ => createCube(userId))
+                      )(_ => complete(StatusCodes.Created))
+                  )
+                ) ~
+                put(
+                  entity(as[Map[String, JsValue]].map(JsObject(_).as[models.User]))(
+                    user =>
+                      onSuccess(
+                        models.User.merge(userId)(Json.toJson(user))
+                      )(_ => complete(StatusCodes.Created))
+                  )
+                )
+          )
+      }
+
+    userRoutes
+
+  }
+
+  private def createCube(ownerId: String): Future[String] =
+    cubeMaster ? CubeMaster.Messages.CreateCube(testAccountId) map (_.asInstanceOf[String])
 
   /**
     * The HTTP binding for the server
@@ -83,6 +120,7 @@ class ApiActor(id: String,
 }
 
 import com.typesafe.scalalogging.LazyLogging
+
 object ApiActor extends LazyLogging {
   def props(id: String,
             host: String,
