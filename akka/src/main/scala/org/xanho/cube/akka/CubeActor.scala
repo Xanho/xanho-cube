@@ -25,18 +25,19 @@ class CubeActor(cubeId: String) extends Actor with ActorLogging {
     * from storage, which may take a while.  This step will block until complete.
     */
   private var cube: Cube =
-    Cube(
-      cubeId,
-      Seq.empty,
-      DocumentStorage.default
-        .get(Buckets.CUBES, cubeId, "graph")
-        .map(_.fold(new MutableGraph())(_.as[MutableGraph](MutableGraph.read())))
-        .await,
-      DocumentStorage.default
-        .get(Buckets.CUBES, cubeId, "data")
-        .map(_.get.as[Map[String, JsValue]])
-        .await
-    )((dest, text) => sendMessage(dest, text))
+    DocumentStorage.default
+      .get(Buckets.CUBES, cubeId, "graph")
+      .map(_.fold(new MutableGraph())(_.as[MutableGraph](MutableGraph.read())))
+      .zip(
+        DocumentStorage.default
+          .get(Buckets.CUBES, cubeId, "data")
+          .map(_.get.as[Map[String, JsValue]])
+      )
+      .map {
+        case (graph, data) =>
+          Cube(cubeId, Seq.empty, graph, data)((dest, text) => sendMessage(dest, text))
+      }
+      .await
 
   /**
     * The ID of the listener attached to this Cube's message storage in the database
@@ -136,14 +137,12 @@ class CubeActor(cubeId: String) extends Actor with ActorLogging {
     * Save the cube's graph and data to document storage
     */
   private def saveCube(): Future[_] =
-    Future.sequence(
-      Vector(
-        DocumentStorage.default
-          .write(Buckets.CUBES, cubeId, "graph")(Json.toJson(cube.graph)),
+    DocumentStorage.default
+      .write(Buckets.CUBES, cubeId, "graph")(Json.toJson(cube.graph))
+      .zip(
         DocumentStorage.default
           .write(Buckets.CUBES, cubeId, "data")(JsObject(cube.data))
       )
-    )
 
   /**
     * Sends a message from this cube to the destination, retrying X number of times in case of failure

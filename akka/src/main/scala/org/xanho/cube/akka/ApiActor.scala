@@ -13,10 +13,11 @@ import akka.pattern.ask
 import akka.stream.ActorMaterializer
 import de.heikoseeberger.akkahttpplayjson.PlayJsonSupport._
 import org.xanho.cube.akka.api.{authenticator, models, realm}
+import org.xanho.utility.FutureUtility.FutureHelper
 import play.api.libs.json.{JsObject, JsValue, Json}
 
+import scala.concurrent.Future
 import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, Future}
 
 /**
   * An Actor which serves as an API/HTTP Server, which enables an HTTP entrypoint into the system
@@ -35,7 +36,7 @@ class ApiActor(id: String,
     * A reference to the Cube Master
     */
   private val cubeMaster: ActorRef =
-    Await.result(context.actorSelection(masterPath).resolveOne(), defaultTimeout)
+    context.actorSelection(masterPath).resolveOne().await
 
   implicit val materializer =
     ActorMaterializer()
@@ -112,11 +113,9 @@ class ApiActor(id: String,
     * until the server binding completes its shutdown.
     */
   override def postStop(): Unit =
-    Await.ready(
-      binding
-        .flatMap(_.unbind()),
-      Duration.Inf
-    )
+    binding
+      .flatMap(_.unbind())
+      .await(Duration.Inf)
 }
 
 import com.typesafe.scalalogging.LazyLogging
