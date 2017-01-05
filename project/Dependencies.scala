@@ -1,9 +1,15 @@
+import org.scalajs.sbtplugin.ScalaJSPlugin.autoImport._
 import sbt._
 
 object Dependencies {
 
   object versions {
     val play = "2.5.10"
+    val udashVersion = "0.4.0"
+    val udashJQueryVersion = "1.0.0"
+    val logbackVersion = "1.1.3"
+    val jettyVersion = "9.3.11.v20160721"
+    val upickleVersion = "0.4.3"
   }
 
   val playJson =
@@ -67,6 +73,43 @@ object Dependencies {
   val firebase =
     Seq(
       "com.google.firebase" % "firebase-admin" % "4.0.3"
+    )
+
+  val crossDeps =
+    Def.setting(
+      Seq[ModuleID](
+        "io.udash" %%% "udash-core-shared" % versions.udashVersion,
+        "io.udash" %%% "udash-rpc-shared" % versions.udashVersion,
+        "com.lihaoyi" %%% "upickle" % versions.upickleVersion
+      )
+    )
+
+  val frontendDeps =
+    Def.setting(
+      Seq[ModuleID](
+        "io.udash" %%% "udash-core-frontend" % versions.udashVersion,
+        "io.udash" %%% "udash-jquery" % versions.udashJQueryVersion,
+        "io.udash" %%% "udash-rpc-frontend" % versions.udashVersion,
+        "com.github.japgolly.scalacss" %%% "core" % "0.5.0",
+        "com.github.japgolly.scalacss" %%% "ext-scalatags" % "0.5.0"
+      )
+    )
+
+  val frontendJSDeps =
+    Def.setting(
+      Seq[org.scalajs.sbtplugin.JSModuleID](
+        "org.webjars" % "firebase" % "3.2.0" / "firebase.js"
+      )
+    )
+
+  val backendDeps =
+    Def.setting(
+      Seq[ModuleID](
+        "org.eclipse.jetty" % "jetty-server" % versions.jettyVersion,
+        "org.eclipse.jetty" % "jetty-servlet" % versions.jettyVersion,
+        "io.udash" %% "udash-rpc-backend" % versions.udashVersion,
+        "org.eclipse.jetty.websocket" % "websocket-server" % versions.jettyVersion
+      )
     )
 
 }
