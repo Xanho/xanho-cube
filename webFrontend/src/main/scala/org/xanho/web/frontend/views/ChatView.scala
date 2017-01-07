@@ -55,7 +55,7 @@ class ChatPresenter(model: ModelProperty[ChatViewModel]) extends Presenter[ChatS
 
   def handleState(state: ChatState.type): Unit = {}
 
-  Auth.observeUser {
+  Auth.observeAuth {
     case m: Some[FirebaseUser] =>
       model.subProp(_.user).set(m)
     case _ =>
@@ -70,10 +70,11 @@ object ChatViewPresenter extends ViewPresenter[ChatState.type] {
   override def create(): (ChatView, ChatPresenter) = {
     val model =
       ModelProperty(
-        ChatViewModel(Auth.currentUser, "", "", Seq.empty)
+        ChatViewModel(Auth.currentFirebaseUser, "", "", Seq.empty)
       )
 
-    model.subProp(_.currentUserText)
+    model
+      .subProp(_.currentUserText)
       .addValidator(text =>
         if (text.nonEmpty)
           Valid

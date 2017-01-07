@@ -8,3 +8,9 @@ case class User(uid: String,
                 lastName: Option[String],
                 birthDate: Option[Date],
                 cubeId: Option[String])
+
+object User {
+  def default(uid: String,
+              email: String): User =
+    User(uid, email, None, None, None, None)
+}

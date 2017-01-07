@@ -46,7 +46,7 @@ case object IndexState extends RoutingState(null)
 
 class IndexPresenter(model: ModelProperty[IndexViewModel]) extends Presenter[IndexState.type] {
 
-  Auth.observeUser(model.subProp(_.user).set)
+  Auth.observeAuth(model.subProp(_.user).set)
 
   def handleState(state: IndexState.type): Unit = {}
 
@@ -58,7 +58,7 @@ object IndexViewPresenter extends ViewPresenter[IndexState.type] {
 
   override def create(): (IndexView, IndexPresenter) = {
     val model =
-      ModelProperty(IndexViewModel(Auth.currentUser))
+      ModelProperty(IndexViewModel(Auth.currentFirebaseUser))
 
     val presenter =
       new IndexPresenter(model)

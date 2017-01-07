@@ -79,7 +79,7 @@ lazy val webBackend =
   project
     .in(file("webBackend"))
     .settings(commonSettings: _*)
-    .dependsOn(webSharedJVM)
+    .dependsOn(webSharedJVM, utility, cubeAkka)
     .settings(
       name := "web-backend",
       libraryDependencies ++= Dependencies.backendDeps.value,
@@ -133,19 +133,5 @@ lazy val webFrontend =
         (crossTarget in(Compile, packageScalaJSLauncher)).value / StaticFilesDir / WebContent / "scripts" / "frontend-init.js"
     )
     .settings(
-      bootSnippet := "org.xanho.web.frontend.Init().main();",
-      updatedJS := {
-        var files: List[String] = Nil
-        ((crossTarget in Compile).value / StaticFilesDir ** "*.js").get.foreach {
-          (x: File) =>
-            streams.value.log.info("workbench: Checking " + x.getName)
-            FileFunction.cached(streams.value.cacheDirectory / x.getName, FilesInfo.lastModified, FilesInfo.lastModified) {
-              (f: Set[File]) =>
-                val fsPath = f.head.getAbsolutePath.drop(new File("").getAbsolutePath.length)
-                files = "http://localhost:12345" + fsPath :: files
-                f
-            }(Set(x))
-        }
-        files
-      }
+      bootSnippet := "org.xanho.web.frontend.Init().main();"
     )

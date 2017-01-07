@@ -1,7 +1,7 @@
 package org.xanho.web.backend.rpc
 
 import io.udash.rpc._
-import org.xanho.frontend.rpc.MainClientRPC
+import org.xanho.web.frontend.rpc.MainClientRPC
 
 import scala.concurrent.ExecutionContext
 

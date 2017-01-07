@@ -216,12 +216,10 @@ class CubeMaster extends Actor with ActorLogging {
 
 object CubeMaster extends LazyLogging {
 
-  def initialize(): Unit = {
+  def initialize()
+                (implicit system: ActorSystem = defaultSystem): Unit = {
     logger.info("Starting a Cube Master actor")
-    val system =
-      ActorSystem("xanho")
-    val actor =
-      system.actorOf(Props[CubeMaster], "cube-master")
+    system.actorOf(Props[CubeMaster], "cube-master")
   }
 
   object Messages {

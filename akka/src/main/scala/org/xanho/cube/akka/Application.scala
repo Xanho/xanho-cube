@@ -17,6 +17,7 @@ object Application extends App {
           val port =
             config.getInt("xanho.api.port")
           ApiActor.initialize(host = host, port = port)
+
       }
   }
 

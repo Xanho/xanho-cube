@@ -128,11 +128,9 @@ object ApiActor extends LazyLogging {
 
   def initialize(id: String = UUID.randomUUID().toString,
                  host: String,
-                 port: Int): Unit = {
+                 port: Int)
+                (implicit system: ActorSystem = defaultSystem): Unit = {
     logger.info(s"Starting an API actor with ID $id at $host:$port")
-    val system =
-      ActorSystem("xanho")
-
     system.actorOf(props(id, host, port), s"$apiPrefix$id")
   }
 }

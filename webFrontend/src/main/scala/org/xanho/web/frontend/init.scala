@@ -1,10 +1,10 @@
 package org.xanho.web.frontend
 
+import io.udash.{Application, StrictLogging}
 import io.udash.wrappers.jquery._
-import io.udash.{StrictLogging, _}
 import org.scalajs.dom.{Element, document}
 import org.xanho.web.frontend.js.{FirebaseConfig, ImportedJS}
-import org.xanho.web.frontend.rpc.RPCService
+import org.xanho.web.frontend.rpc.{MainClientRPC, MainServerRPC, RPCService}
 import org.xanho.web.frontend.styles.partials.{FooterStyles, HeaderStyles}
 import org.xanho.web.frontend.styles.{GlobalStyles, IndexStyles}
 import org.xanho.web.frontend.views.IndexState
@@ -27,7 +27,6 @@ object Context {
     new Application[RoutingState](routingRegistry, viewPresenterRegistry, IndexState)
 
   import io.udash.rpc._
-  import org.xanho.frontend.rpc._
 
   val serverRpc: MainServerRPC =
     DefaultServerRPC[MainClientRPC, MainServerRPC](new RPCService)

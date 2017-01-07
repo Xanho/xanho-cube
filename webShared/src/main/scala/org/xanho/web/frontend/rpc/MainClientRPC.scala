@@ -1,10 +1,9 @@
-package org.xanho.frontend.rpc
+package org.xanho.web.frontend.rpc
 
 import com.avsystem.commons.rpc.RPC
-import io.udash.rpc._
 
 @RPC
 trait MainClientRPC {
-  def push(number: Int): Unit
+  def push(id: Int): Unit
 }
        

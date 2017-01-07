@@ -127,12 +127,10 @@ object CubeCluster extends LazyLogging {
     Props(new CubeCluster(id, maximumCapacity))
 
   def initialize(id: String = UUID.randomUUID().toString,
-                 maximumCapacity: Int = 20): Unit = {
+                 maximumCapacity: Int = 20)
+                (implicit system: ActorSystem = defaultSystem): Unit = {
     logger.info(s"Starting a Cube Cluster actor with ID $id")
-    val system =
-      ActorSystem("xanho")
-    val actor =
-      system.actorOf(props(id, maximumCapacity), s"$cubeClusterPrefix$id")
+    system.actorOf(props(id, maximumCapacity), s"$cubeClusterPrefix$id")
   }
 
   object Messages {

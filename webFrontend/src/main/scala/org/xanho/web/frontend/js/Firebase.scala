@@ -3,7 +3,6 @@ package org.xanho.web.frontend.js
 import org.xanho.web.shared.models
 
 import scala.scalajs.js
-import scala.scalajs.js.Promise
 import scala.scalajs.js.annotation.{JSName, ScalaJSDefined}
 
 @js.native
@@ -33,7 +32,9 @@ trait Auth extends js.Object {
 
   def onAuthStateChanged(nextOrObserver: js.Function1[js.UndefOr[User], Unit]): Unit = js.native
 
-  def signInWithEmailAndPassword(email: String, password: String): Promise[User] = js.native
+  def signInWithEmailAndPassword(email: String, password: String): js.Promise[User] = js.native
+
+  def signInWithPopup(authProvider: AuthProvider): js.Promise[UserCredential]
 }
 
 @js.native
@@ -68,12 +69,34 @@ object User {
 }
 
 @js.native
+trait UserCredential extends js.Object {
+  var user: js.UndefOr[User] = js.native
+  var credential: js.UndefOr[AuthCredential] = js.native
+}
+
+@js.native
 trait UserInfo extends js.Object {
   val displayName: String = js.native
   val email: String = js.native
   val photoUrl: String = js.native
   val providerId: String = js.native
   val uid: String = js.native
+}
+
+@JSName("firebase.auth.AuthProvider")
+@js.native
+trait AuthProvider extends js.Object
+
+@js.native
+class `firebase.auth.GoogleAuthProvider`() extends js.Object with AuthProvider {
+  val providerId: String = js.native
+
+  def credential(idToken: js.UndefOr[String], accessToken: js.UndefOr[String]): AuthCredential = js.native
+}
+
+@js.native
+trait AuthCredential extends js.Object {
+  var provider: String
 }
 
 @js.native

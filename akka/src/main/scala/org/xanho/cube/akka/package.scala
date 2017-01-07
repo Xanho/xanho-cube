@@ -1,6 +1,7 @@
 package org.xanho.cube
 import scala.concurrent.duration._
 import org.xanho.utility.Config.config
+import _root_.akka.actor.ActorSystem
 package object akka {
 
   object Messages {
@@ -29,6 +30,9 @@ package object akka {
 
   val apiPrefix: String =
     config.getString("xanho.akka.api.prefix")
+
+  val webPrefix: String =
+    config.getString("xanho.akka.web.prefix")
 
   val actorHostname: String =
     config.getString("akka.remote.netty.tcp.hostname")
@@ -61,5 +65,8 @@ package object akka {
                    host: String,
                    port: Int) =
     s"akka.tcp://$actorSystemName@$host:$port$base"
+
+  lazy val defaultSystem =
+    ActorSystem("xanho")
 
 }
