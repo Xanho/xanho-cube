@@ -3,6 +3,7 @@ package org.xanho.web.frontend.views
 import io.udash._
 import io.udash.properties.model.ModelProperty
 import org.xanho.web.frontend.RoutingState
+import org.xanho.web.frontend.rpc.RPC
 import org.xanho.web.frontend.styles.IndexStyles
 import org.xanho.web.frontend.utility.Auth
 import org.xanho.web.shared.models.FirebaseUser

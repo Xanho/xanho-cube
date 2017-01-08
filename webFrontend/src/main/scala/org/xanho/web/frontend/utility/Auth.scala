@@ -62,7 +62,8 @@ object Auth {
               )
             )
           case _ =>
-            serverRpc.register(firebaseUser)
+            // RPC.register(firebaseUser)
+            Future.successful(???)
         },
       5.seconds
     )

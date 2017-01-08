@@ -2,7 +2,7 @@ package org.xanho.cube.akka
 
 import java.util.UUID
 
-import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
+import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, Terminated}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.Http.ServerBinding
 import akka.http.scaladsl.model.StatusCodes
@@ -10,6 +10,7 @@ import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.http.scaladsl.server.RouteResult.route2HandlerFlow
 import akka.pattern.ask
+import akka.routing.{ActorRefRoutee, RoundRobinRoutingLogic, Router}
 import akka.stream.ActorMaterializer
 import de.heikoseeberger.akkahttpplayjson.PlayJsonSupport._
 import org.xanho.cube.akka.api.{authenticator, models, realm}
@@ -129,8 +130,40 @@ object ApiActor extends LazyLogging {
   def initialize(id: String = UUID.randomUUID().toString,
                  host: String,
                  port: Int)
-                (implicit system: ActorSystem = defaultSystem): Unit = {
+                (implicit system: ActorSystem = defaultSystem): ActorRef = {
     logger.info(s"Starting an API actor with ID $id at $host:$port")
     system.actorOf(props(id, host, port), s"$apiPrefix$id")
   }
+}
+
+class ApiRouter(initialSize: Int,
+                host: String,
+                port: Int) extends Actor {
+
+  private def newRoutee() =
+    ApiActor.initialize(host = host, port = port)
+
+  private var router = {
+    val routees = Vector.fill(1) {
+      val r = newRoutee()
+      context watch r
+      ActorRefRoutee(r)
+    }
+    Router(RoundRobinRoutingLogic(), routees)
+  }
+
+  def receive: Receive = {
+    case Terminated(a) =>
+      router = router.removeRoutee(a)
+      val r = newRoutee()
+      context watch r
+      router = router.addRoutee(r)
+    case message =>
+      router.route(message, sender())
+  }
+
+}
+
+object ApiRouter {
+
 }

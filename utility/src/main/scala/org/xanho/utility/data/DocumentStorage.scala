@@ -79,6 +79,8 @@ abstract class DocumentStorage {
 }
 
 object DocumentStorage {
+  def apply(): DocumentStorage =
+    default
   def default: DocumentStorage =
     FirebaseDatabase
 }

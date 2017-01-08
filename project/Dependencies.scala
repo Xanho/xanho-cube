@@ -49,7 +49,8 @@ object Dependencies {
     Seq(
       "com.typesafe.akka" %% "akka-http" % version,
       "com.typesafe.akka" %% "akka-http-testkit" % version,
-      "de.heikoseeberger" %% "akka-http-play-json" % "1.10.1"
+      "de.heikoseeberger" %% "akka-http-play-json" % "1.10.1",
+      "com.lihaoyi" %% "upickle" % versions.upickleVersion
     )
   }
 

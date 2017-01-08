@@ -1,9 +1,13 @@
 package org.xanho.web.backend
 
-import org.xanho.web.backend.jetty.JettyServer
+import org.xanho.cube.akka.WebActor
 
 object Launcher extends App {
-  val server =
-    new JettyServer(8080, "webBackend/target/UdashStatic/WebContent")
-  server.start()
+
+  WebActor.initialize(
+    host = "127.0.0.1",
+    port = 8080,
+    resourceBasePath = "./webBackend/target/UdashStatic/WebContent/"
+  )
+
 }

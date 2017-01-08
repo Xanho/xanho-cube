@@ -50,7 +50,7 @@ lazy val cubeAkka =
         Dependencies.akka ++
           Dependencies.akkaHttp
     )
-    .dependsOn(cubeCore, utility)
+    .dependsOn(cubeCore, utility, webSharedJVM)
 
 
 //

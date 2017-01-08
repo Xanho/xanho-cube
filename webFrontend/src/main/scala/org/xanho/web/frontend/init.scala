@@ -1,10 +1,10 @@
 package org.xanho.web.frontend
 
-import io.udash.{Application, StrictLogging}
 import io.udash.wrappers.jquery._
-import org.scalajs.dom.{Element, document}
+import io.udash.{Application, StrictLogging}
+import org.scalajs.dom._
 import org.xanho.web.frontend.js.{FirebaseConfig, ImportedJS}
-import org.xanho.web.frontend.rpc.{MainClientRPC, MainServerRPC, RPCService}
+import org.xanho.web.frontend.rpc.RPC
 import org.xanho.web.frontend.styles.partials.{FooterStyles, HeaderStyles}
 import org.xanho.web.frontend.styles.{GlobalStyles, IndexStyles}
 import org.xanho.web.frontend.views.IndexState
@@ -26,10 +26,7 @@ object Context {
   implicit val applicationInstance =
     new Application[RoutingState](routingRegistry, viewPresenterRegistry, IndexState)
 
-  import io.udash.rpc._
-
-  val serverRpc: MainServerRPC =
-    DefaultServerRPC[MainClientRPC, MainServerRPC](new RPCService)
+  RPC
 
 }
 
@@ -54,6 +51,8 @@ object Init extends JSApp with StrictLogging {
             "943127112483"
           )
         )
+
+        Context
 
         applicationInstance.run(appRoot.get)
 
