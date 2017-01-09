@@ -11,12 +11,12 @@ lazy val commonSettings =
         Dependencies.logging
   )
 
-lazy val root =
+lazy val cube =
   project
     .in(file("."))
     .settings(commonSettings: _*)
     .settings(packagedArtifacts := Map.empty)
-    .aggregate(utility, cubeCore, cubeAkka, webBackend, webFrontend, webSharedJVM, webSharedJS)
+    .aggregate(utility, cubeCore, cubeAkka, webFrontend, webSharedJVM, webSharedJS)
 
 lazy val utility =
   project
@@ -74,31 +74,6 @@ lazy val webSharedJVM =
 
 lazy val webSharedJS =
   webShared.js
-
-lazy val webBackend =
-  project
-    .in(file("webBackend"))
-    .settings(commonSettings: _*)
-    .dependsOn(webSharedJVM, utility, cubeAkka)
-    .settings(
-      name := "web-backend",
-      libraryDependencies ++= Dependencies.backendDeps.value,
-      crossLibs(Compile),
-
-      compile <<= (compile in Compile),
-      (compile in Compile) <<= (compile in Compile).dependsOn(copyStatics),
-      copyStatics := IO.copyDirectory((crossTarget in webFrontend).value / StaticFilesDir, (target in Compile).value / StaticFilesDir),
-      copyStatics <<= copyStatics.dependsOn(compileStatics in webFrontend),
-
-      mappings in(Compile, packageBin) ++= {
-        copyStatics.value
-        ((target in Compile).value / StaticFilesDir).***.get map { file =>
-          file -> file.getAbsolutePath.stripPrefix((target in Compile).value.getAbsolutePath)
-        }
-      },
-
-      watchSources ++= (sourceDirectory in webFrontend).value.***.get
-    )
 
 lazy val webFrontend =
   project

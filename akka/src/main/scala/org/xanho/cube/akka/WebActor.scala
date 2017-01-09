@@ -3,12 +3,13 @@ package org.xanho.cube.akka
 import java.util.UUID
 
 import akka.NotUsed
-import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, PoisonPill, Props}
+import akka.actor.{Actor, ActorContext, ActorLogging, ActorRef, ActorSystem, PoisonPill, Props}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.Http.ServerBinding
 import akka.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
+import akka.routing.RoundRobinPool
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.util.ByteString
@@ -63,9 +64,9 @@ class WebActor(id: String,
     */
   private val binding: Future[ServerBinding] =
     Http()(context.system).bindAndHandle(routes, host, port)
-      .map {
+      .map { binding =>
         log.info(s"Server online at http://$host:$port/")
-        _
+        binding
       }
 
   /**
@@ -138,4 +139,26 @@ object WebActor extends LazyLogging {
       system.actorOf(props(id, host, port, resourceBasePath), s"$webPrefix$id")
     (actorRef, system)
   }
+}
+
+object WebRouter extends LazyLogging {
+
+  def initialize(initialSize: Int = 1,
+                 host: String,
+                 port: Int,
+                 resourceBasePath: String)
+                (implicit system: ActorSystem = defaultSystem): ActorRef = {
+    logger.info(s"Starting a Web Router actor")
+    system.actorOf(
+      RoundRobinPool(initialSize)
+        .props(
+          WebActor.props(UUID.randomUUID().toString, host, port, resourceBasePath)
+        ),
+      "web"
+    )
+  }
+
+  def ref(implicit context: ActorContext): Future[ActorRef] =
+    context.actorSelection(webPath).resolveOne()
+
 }

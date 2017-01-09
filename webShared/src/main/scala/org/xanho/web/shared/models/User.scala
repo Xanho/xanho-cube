@@ -18,13 +18,14 @@ object User {
 
   import upickle.default._
 
-  implicit val reader: Reader[User] =
+  def reader(uid: String,
+             email: String): Reader[User] =
     Reader[User] {
       case o: Js.Obj =>
         val obj = o.obj
         User(
-          obj("uid").str,
-          obj("email").str,
+          uid,
+          email,
           obj.get("firstName").map(_.str),
           obj.get("lastName").map(_.str),
           obj.get("birthDate").map(_.num.toLong).map(new Date(_)),
@@ -36,11 +37,7 @@ object User {
     Writer[User](
       user =>
         Js.Obj(
-          Seq(
-            "uid" -> Js.Str(user.uid),
-            "email" -> Js.Str(user.email)
-          ) ++
-            user.firstName.map("firstName" -> Js.Str(_)) ++
+          user.firstName.toSeq.map("firstName" -> Js.Str(_)) ++
             user.lastName.map("lastName" -> Js.Str(_)) ++
             user.birthDate.map(_.getTime).map("birthDate" -> Js.Num(_)) ++
             user.firstName.map("cubeId" -> Js.Str(_))

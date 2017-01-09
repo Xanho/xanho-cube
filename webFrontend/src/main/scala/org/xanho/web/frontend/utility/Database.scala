@@ -1,12 +1,15 @@
 package org.xanho.web.frontend.utility
 
+import java.util.UUID
+
 import org.xanho.web.frontend.js.{DataSnapshot, ImportedJS}
 import upickle.Js
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.scalajs.js
-import scala.scalajs.js.Any.fromFunction1
+import scala.scalajs.js._
 import scala.scalajs.js.JSConverters._
+import scala.util.Try
 
 object Database {
 
@@ -26,12 +29,20 @@ object Database {
     * @param key    The key path to the item
     * @return A Future optional value
     */
-  def get(bucket: String, key: String*)(implicit ec: ExecutionContext): Future[Option[Js.Value]] = {
+  def get(bucket: String, key: String*)(implicit ec: ExecutionContext): Future[Js.Value] = {
     val promise =
-      scala.concurrent.Promise[Option[Js.Value]]()
+      Promise[Js.Value]()
     val onSuccess: js.Function1[DataSnapshot, Unit] =
       (snapshot: DataSnapshot) => {
-        promise complete ???
+        Option(snapshot.value()) match {
+          case Some(value) =>
+            val js =
+              Try(upickle.json.readJs(value))
+            println(js)
+            promise complete js
+          case _ =>
+            promise failure new NoSuchElementException((bucket +: key).mkString("/"))
+        }
         ()
       }
     val onFailure: js.Function1[js.Error, Unit] =
@@ -48,6 +59,33 @@ object Database {
         None.orUndefined
       )
     promise.future
+  }
+
+  def listen(bucket: String, key: String*)
+            (handler: (String, Js.Value => Unit))
+            (implicit ec: ExecutionContext): String = {
+    val id =
+      UUID.randomUUID().toString
+    val onSuccess: js.Function1[DataSnapshot, Unit] =
+      (snapshot: DataSnapshot) => {
+        Option(snapshot.value())
+          .flatMap(value => Try(upickle.json.readJs(value)).toOption)
+          .foreach(handler._2)
+        ()
+      }
+    val onFailure: js.Function1[js.Error, Unit] =
+      (error: js.Error) => {
+        throw new Exception(error.message)
+        ()
+      }
+    ref(bucket, key)
+      .on(
+        handler._1,
+        Some(onSuccess).orUndefined,
+        Some(onFailure).orUndefined,
+        None.orUndefined
+      )
+    id
   }
 
   /**
@@ -104,13 +142,19 @@ object Database {
     * @return A Future containing either the ID or index of the appended item
     */
   def append(bucket: String, key: String*)(value: Js.Value)(implicit ec: ExecutionContext): Future[String] =
-    ???
+    ref(bucket, key)
+      .push(
+        JSON.parse(upickle.json.write(value)),
+        None.orUndefined
+      )
+    .toFuture
+    .map(_.key)
 
-}
+  object Listeners {
 
-object DynamicHelper {
+    def childAdded(f: Js.Value => Unit): (String, Js.Value => Unit) =
+      ("child_added", f)
 
-  def toJsonObject(value: js.Dynamic): Js.Obj =
-    ???
+  }
 
 }

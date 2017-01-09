@@ -103,14 +103,4 @@ object Dependencies {
       )
     )
 
-  val backendDeps =
-    Def.setting(
-      Seq[ModuleID](
-        "org.eclipse.jetty" % "jetty-server" % versions.jettyVersion,
-        "org.eclipse.jetty" % "jetty-servlet" % versions.jettyVersion,
-        "io.udash" %% "udash-rpc-backend" % versions.udashVersion,
-        "org.eclipse.jetty.websocket" % "websocket-server" % versions.jettyVersion
-      )
-    )
-
 }

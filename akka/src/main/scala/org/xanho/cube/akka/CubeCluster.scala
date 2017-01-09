@@ -49,12 +49,12 @@ class CubeCluster(id: String,
   }
 
   def receive: Receive = {
-    case CubeCluster.Messages.Register(cubeIds) =>
+    case CubeMaster.Messages.Mount(cubeIds) =>
       log.info(s"Received cube registration request for cube IDs: $cubeIds")
       cubeIds.foreach(loadCube)
       sender() ! Messages.Ok
 
-    case CubeCluster.Messages.Unregister(cubeIds) =>
+    case CubeMaster.Messages.Dismount(cubeIds) =>
       log.info(s"Received cube unregister request for cube IDs: $cubeIds")
       Await.ready(
         Future.traverse(cubeIds)(unloadCube)
@@ -67,7 +67,7 @@ class CubeCluster(id: String,
         Duration.Inf
       )
 
-    case CubeCluster.Messages.UnregisterAll =>
+    case CubeMaster.Messages.UnregisterAll =>
       log.info("Received cube unregister all request")
       Await.ready(
         Future.traverse(cubeActors.keysIterator)(unloadCube)
@@ -134,12 +134,6 @@ object CubeCluster extends LazyLogging {
   }
 
   object Messages {
-
-    case class Register(cubeIds: Set[String])
-
-    case class Unregister(cubeIds: Set[String])
-
-    case object UnregisterAll
 
     case class Status(cubeIds: Set[String])
 

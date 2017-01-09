@@ -47,18 +47,25 @@ package object akka {
       config.getInt("xanho.akka.cube_master.port")
     )
 
+  val apiPath: String =
+    toRemotePath(
+      s"/user/api",
+      config.getString("xanho.akka.api.hostname"),
+      config.getInt("xanho.akka.api.port")
+    )
+
+  val webPath: String =
+    toRemotePath(
+      s"/user/web",
+      config.getString("xanho.akka.api.hostname"),
+      config.getInt("xanho.akka.api.port")
+    )
+
   def clusterPath(name: String): String =
     toRemotePath(
       s"/user/$cubeClusterPrefix$name",
       config.getString("xanho.akka.cube_cluster.hostname"),
       config.getInt("xanho.akka.cube_cluster.port")
-    )
-
-  def apiPath(id: String): String =
-    toRemotePath(
-      s"/user/$apiPrefix$id",
-      config.getString("xanho.akka.api.hostname"),
-      config.getInt("xanho.akka.api.port")
     )
 
   def toRemotePath(base: String,

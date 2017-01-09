@@ -11,13 +11,26 @@ object Application extends App {
           CubeMaster.initialize()
         case "cube-cluster" =>
           CubeCluster.initialize()
+
         case "api" =>
           val host =
             config.getString("xanho.api.host")
           val port =
             config.getInt("xanho.api.port")
-          ApiActor.initialize(host = host, port = port)
+          ApiRouter.initialize(host = host, port = port)
 
+        case "web" =>
+          val host =
+            config.getString("xanho.web.host")
+          val port =
+            config.getInt("xanho.web.port")
+          val resourceBasePath =
+            config.getString("xanho.web.path")
+          WebRouter.initialize(
+            host = host,
+            port = port,
+            resourceBasePath = resourceBasePath
+          )
       }
   }
 

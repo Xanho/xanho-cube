@@ -10,8 +10,6 @@ class StatesToViewPresenterDef extends ViewPresenterRegistry[RoutingState] {
         IndexViewPresenter
       case ChatState =>
         ChatViewPresenter
-      case LoginState =>
-        LoginViewPresenter
       case _ =>
         ErrorViewPresenter
     }

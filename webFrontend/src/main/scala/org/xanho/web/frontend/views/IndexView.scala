@@ -2,12 +2,13 @@ package org.xanho.web.frontend.views
 
 import io.udash._
 import io.udash.properties.model.ModelProperty
-import org.xanho.web.frontend.RoutingState
-import org.xanho.web.frontend.rpc.RPC
+import org.scalajs.dom.Event
 import org.xanho.web.frontend.styles.IndexStyles
 import org.xanho.web.frontend.utility.Auth
-import org.xanho.web.shared.models.FirebaseUser
+import org.xanho.web.frontend.{Context, RoutingState}
+import org.xanho.web.shared.models.{FirebaseUser, User}
 
+import scala.util.{Failure, Success}
 import scalacss.ScalatagsCss._
 
 
@@ -39,6 +40,21 @@ class IndexView(model: ModelProperty[IndexViewModel],
               .transform(_.fold("Anonymous")(_.email))
           )
         )
+      ),
+      div(
+        showIf(model.subProp(_.user).transform(_.nonEmpty))(
+          a(
+            href := "#",
+            onclick :+= ((e: Event) => Auth.logout())
+          )("Logout").render
+        ),
+        showIf(model.subProp(_.user).transform(_.isEmpty))(
+          input(
+            `type` := "image",
+            src := "./assets/images/btn_google_signin_dark_normal_web.png",
+            onclick :+= ((_: Event) => presenter.login(), true)
+          ).render
+        )
       )
     )
 }
@@ -47,9 +63,27 @@ case object IndexState extends RoutingState(null)
 
 class IndexPresenter(model: ModelProperty[IndexViewModel]) extends Presenter[IndexState.type] {
 
-  Auth.observeAuth(model.subProp(_.user).set)
+  import Context._
+  import org.xanho.web.frontend.utility.Auth.FirebaseUserHelper
+
+  Auth.observeAuth {
+    case Some(firebaseUser) =>
+      firebaseUser.toUser
+        .onComplete {
+          case Success(user) =>
+            model.subProp(_.user).set(Some(user))
+          case Failure(e) =>
+            println(s"Failed to get user from DB: $e")
+            model.subProp(_.user).set(None)
+        }
+    case _ =>
+      model.subProp(_.user).set(None)
+  }
 
   def handleState(state: IndexState.type): Unit = {}
+
+  def login(): Unit =
+    Auth.loginWithGoogle
 
 }
 
@@ -59,7 +93,7 @@ object IndexViewPresenter extends ViewPresenter[IndexState.type] {
 
   override def create(): (IndexView, IndexPresenter) = {
     val model =
-      ModelProperty(IndexViewModel(Auth.currentFirebaseUser))
+      ModelProperty(IndexViewModel(None))
 
     val presenter =
       new IndexPresenter(model)
@@ -70,4 +104,4 @@ object IndexViewPresenter extends ViewPresenter[IndexState.type] {
 
 }
 
-case class IndexViewModel(user: Option[FirebaseUser])
+case class IndexViewModel(user: Option[User])

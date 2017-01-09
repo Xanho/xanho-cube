@@ -2,7 +2,7 @@ package org.xanho.cube.akka
 
 import java.util.UUID
 
-import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, Terminated}
+import akka.actor.{Actor, ActorContext, ActorLogging, ActorRef, ActorSystem, Props}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.Http.ServerBinding
 import akka.http.scaladsl.model.StatusCodes
@@ -10,15 +10,19 @@ import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.http.scaladsl.server.RouteResult.route2HandlerFlow
 import akka.pattern.ask
-import akka.routing.{ActorRefRoutee, RoundRobinRoutingLogic, Router}
+import akka.routing.RoundRobinPool
 import akka.stream.ActorMaterializer
+import com.seancheatham.graph.adapters.memory.MutableGraph
 import de.heikoseeberger.akkahttpplayjson.PlayJsonSupport._
 import org.xanho.cube.akka.api.{authenticator, models, realm}
+import org.xanho.cube.core.Message
 import org.xanho.utility.FutureUtility.FutureHelper
-import play.api.libs.json.{JsObject, JsValue, Json}
+import org.xanho.utility.data.{Buckets, DocumentStorage}
+import play.api.libs.json.{JsObject, JsString, JsValue, Json}
 
 import scala.concurrent.Future
 import scala.concurrent.duration.Duration
+import scala.util.Success
 
 /**
   * An Actor which serves as an API/HTTP Server, which enables an HTTP entrypoint into the system
@@ -37,13 +41,10 @@ class ApiActor(id: String,
     * A reference to the Cube Master
     */
   private val cubeMaster: ActorRef =
-    context.actorSelection(masterPath).resolveOne().await
+    CubeMaster.ref.await
 
   implicit val materializer =
     ActorMaterializer()
-
-  private val testAccountId: String =
-    "abcd1234"
 
   /**
     * The routes for this API
@@ -66,8 +67,8 @@ class ApiActor(id: String,
                   entity(as[Map[String, JsValue]].map(JsObject(_).as[models.User]))(
                     user =>
                       onSuccess(
-                        models.User.write(userId)(Json.toJson(user))
-                          .flatMap(_ => createCube(userId))
+                        self.ask(ApiActor.Messages.Register(userId))
+                          .map(_ => models.User.merge(userId)(Json.toJson(user)))
                       )(_ => complete(StatusCodes.Created))
                   )
                 ) ~
@@ -85,9 +86,6 @@ class ApiActor(id: String,
     userRoutes
 
   }
-
-  private def createCube(ownerId: String): Future[String] =
-    cubeMaster ? CubeMaster.Messages.CreateCube(testAccountId) map (_.asInstanceOf[String])
 
   /**
     * The HTTP binding for the server
@@ -107,6 +105,16 @@ class ApiActor(id: String,
     case Messages.Status =>
       sender() ! Messages.Ok
 
+    case ApiActor.Messages.Register(userId) =>
+      log.info(s"Received cube register request for user $userId")
+      val s = sender()
+      createUser(userId)
+        .onComplete {
+          case Success(_) =>
+            s ! Messages.Ok
+          case _ =>
+            Messages.NotOk
+        }
   }
 
   /**
@@ -117,53 +125,84 @@ class ApiActor(id: String,
     binding
       .flatMap(_.unbind())
       .await(Duration.Inf)
+
+  private def createUser(userId: String): Future[String] = {
+    DocumentStorage()
+      .get("users", userId)
+      .flatMap {
+        case Some(_) =>
+          Future.successful(userId)
+        case _ =>
+          createCube(userId)
+            .flatMap(cubeId =>
+              DocumentStorage().write("users", userId, "cubeId")(JsString(cubeId))
+            )
+            .map(_ => userId)
+      }
+  }
+
+  /**
+    * Creates a new Cube in the database
+    *
+    * @return The ID of the new cube
+    */
+  private def createCube(ownerId: String): Future[String] = {
+    val id =
+      UUID.randomUUID().toString
+    DocumentStorage.default
+      .write(Buckets.CUBES, id)(
+        Json.obj(
+          "messages" -> Seq.empty[Message],
+          "graph" -> new MutableGraph()(),
+          "data" -> Json.obj(
+            "creationDate" -> System.currentTimeMillis(),
+            "ownerId" -> ownerId
+          )
+        )
+      )
+      .flatMap(_ => cubeMaster ? CubeMaster.Messages.Mount(Set(id)))
+      .collect {
+        case Messages.Ok =>
+          id
+      }
+  }
 }
 
 import com.typesafe.scalalogging.LazyLogging
 
 object ApiActor extends LazyLogging {
+
   def props(id: String,
             host: String,
             port: Int): Props =
     Props(new ApiActor(id, host, port))
 
-  def initialize(id: String = UUID.randomUUID().toString,
+
+  object Messages {
+
+    case class Register(userId: String)
+
+  }
+
+}
+
+object ApiRouter extends LazyLogging {
+
+  def initialize(initialSize: Int = 1,
                  host: String,
                  port: Int)
                 (implicit system: ActorSystem = defaultSystem): ActorRef = {
-    logger.info(s"Starting an API actor with ID $id at $host:$port")
-    system.actorOf(props(id, host, port), s"$apiPrefix$id")
-  }
-}
-
-class ApiRouter(initialSize: Int,
-                host: String,
-                port: Int) extends Actor {
-
-  private def newRoutee() =
-    ApiActor.initialize(host = host, port = port)
-
-  private var router = {
-    val routees = Vector.fill(1) {
-      val r = newRoutee()
-      context watch r
-      ActorRefRoutee(r)
-    }
-    Router(RoundRobinRoutingLogic(), routees)
+    logger.info(s"Starting an API Router actor")
+    system.actorOf(
+      RoundRobinPool(initialSize)
+        .props(
+          ApiActor.props(UUID.randomUUID().toString, host, port)
+        ),
+      "api"
+    )
   }
 
-  def receive: Receive = {
-    case Terminated(a) =>
-      router = router.removeRoutee(a)
-      val r = newRoutee()
-      context watch r
-      router = router.addRoutee(r)
-    case message =>
-      router.route(message, sender())
-  }
-
-}
-
-object ApiRouter {
+  def ref(implicit context: ActorContext): Future[ActorRef] =
+    context.actorSelection(apiPath).resolveOne()
 
 }

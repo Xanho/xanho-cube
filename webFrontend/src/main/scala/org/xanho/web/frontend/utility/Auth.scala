@@ -1,14 +1,14 @@
 package org.xanho.web.frontend.utility
 
-import java.util.Date
+import java.util.NoSuchElementException
 
 import org.xanho.web.frontend.js.ImportedJS.firebase
 import org.xanho.web.frontend.js.`firebase.auth.GoogleAuthProvider`
+import org.xanho.web.frontend.rpc.RPC
 import org.xanho.web.frontend.{js => jsLib}
-import org.xanho.web.shared.models.{FirebaseUser, User}
+import org.xanho.web.shared.models.FirebaseUser
 
-import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
+import scala.concurrent.Future
 import scala.scalajs.js
 
 object Auth {
@@ -31,6 +31,10 @@ object Auth {
       .flatMap(Option.apply)
       .flatMap(jsLib.User.toModel)
 
+  def logout(): Future[_] =
+    firebase.auth().signOut()
+      .toFuture
+
   def loginWithEmailPassword(email: String, password: String): Future[FirebaseUser] =
     firebase.auth().signInWithEmailAndPassword(email, password).toFuture
       .map(org.xanho.web.frontend.js.User.toModel(_).get)
@@ -44,28 +48,27 @@ object Auth {
       .map(_.flatMap(org.xanho.web.frontend.js.User.toModel).get)
   }
 
-  implicit def firebaseUserToUser(firebaseUser: FirebaseUser): User =
-    Await.result(
-      Database.get("users", firebaseUser.uid)
-        .flatMap {
-          case Some(v) =>
-            val obj =
-              v.obj
-            Future.successful(
-              User(
-                firebaseUser.uid,
-                firebaseUser.email,
-                obj.get("firstName").map(_.str),
-                obj.get("lastName").map(_.str),
-                obj.get("birthDate").map(_.num.toLong).map(new Date(_)),
-                obj.get("cubeId").map(_.str)
-              )
-            )
-          case _ =>
-            // RPC.register(firebaseUser)
-            Future.successful(???)
-        },
-      5.seconds
-    )
+  implicit class FirebaseUserHelper(firebaseUser: FirebaseUser) {
+
+    import org.xanho.web.shared.models
+    import upickle.Js
+    import upickle.default.readJs
+
+    def toUser: Future[models.User] = {
+      def fetchUser(tries: Int = 4): Future[Js.Value] =
+        if (tries > 0)
+          Database.get("users", firebaseUser.uid)
+            .recoverWith {
+              case _: NoSuchElementException =>
+                RPC.register(firebaseUser)
+                  .flatMap(_ => fetchUser(tries - 1))
+            }
+        else
+          Future.failed(new NoSuchElementException(firebaseUser.uid))
+
+      fetchUser()
+        .map(readJs(_)(models.User.reader(firebaseUser.uid, firebaseUser.email)))
+    }
+  }
 
 }

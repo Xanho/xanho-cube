@@ -40,7 +40,7 @@ case class Cube(id: String,
     val newCube =
       copy(messages = messages :+ message)(sendMessage)
     if(message.sourceId != id)
-      sendMessage(message.sourceId, s"Hello ${message.sourceId}")
+      sendMessage(message.sourceId, s"Hello ${message.sourceId}.  You said: ${message.text}")
     newCube
   }
 

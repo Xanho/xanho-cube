@@ -2,7 +2,7 @@ package org.xanho.web.frontend
 
 import io.udash._
 import io.udash.utils.Bidirectional
-import org.xanho.web.frontend.views.{ChatState, IndexState, LoginState}
+import org.xanho.web.frontend.views.{ChatState, IndexState}
 
 class RoutingRegistryDef extends RoutingRegistry[RoutingState] {
   def matchUrl(url: Url): RoutingState =
@@ -27,8 +27,6 @@ class RoutingRegistryDef extends RoutingRegistry[RoutingState] {
     Bidirectional[String, RoutingState] {
       case "/chat" =>
         ChatState
-      case "/login" =>
-        LoginState
     }
 
 }

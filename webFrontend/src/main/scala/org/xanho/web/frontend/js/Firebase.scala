@@ -34,7 +34,9 @@ trait Auth extends js.Object {
 
   def signInWithEmailAndPassword(email: String, password: String): js.Promise[User] = js.native
 
-  def signInWithPopup(authProvider: AuthProvider): js.Promise[UserCredential]
+  def signInWithPopup(authProvider: AuthProvider): js.Promise[UserCredential] = js.native
+
+  def signOut(): js.Promise[Unit] = js.native
 }
 
 @js.native
@@ -116,7 +118,7 @@ trait Reference extends js.Object {
 
   def update(value: js.Any, onComplete: js.UndefOr[js.Function1[js.UndefOr[js.Error], Unit]]): js.Promise[_] = js.native
 
-  def push(value: js.Any, onComplete: js.UndefOr[js.Function1[js.UndefOr[js.Error], Unit]]): js.Thenable[Reference] = js.native
+  def push(value: js.Dynamic, onComplete: js.UndefOr[js.Function1[js.UndefOr[js.Error], Unit]]): js.Thenable[Reference] = js.native
 
   def remove(onComplete: js.UndefOr[js.Function1[js.UndefOr[js.Error], Unit]]): js.Promise[_] = js.native
 
@@ -124,6 +126,11 @@ trait Reference extends js.Object {
            successCallback: js.UndefOr[js.Function1[DataSnapshot, Unit]],
            failureCallbackOrContext: js.UndefOr[js.Function1[js.Error, Unit]],
            context: js.UndefOr[js.Any]): Unit = js.native
+
+  def on(eventType: String,
+         callback: js.UndefOr[js.Function1[DataSnapshot, Unit]],
+         cancelCallbackOrContext: js.UndefOr[js.Function1[js.Error, Unit]],
+         context: js.UndefOr[js.Any]): Unit = js.native
 
 }
 

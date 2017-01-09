@@ -56,11 +56,6 @@ class CubeActor(cubeId: String) extends Actor with ActorLogging {
   context.system.scheduler.schedule(5.minutes, 5.minutes)(self ! CubeActor.Messages.SaveData)
 
   /**
-    * Send a test message every 20 seconds
-    */
-  context.system.scheduler.schedule(5.seconds, 20.seconds)(sendMessage(cube.ownerId, "Test Message"))
-
-  /**
     * Interprets the following messages:
     * Cube Message: Pass into cube, see if the cube has a response, and respond with it
     * Start Dreaming: Enable Dream State

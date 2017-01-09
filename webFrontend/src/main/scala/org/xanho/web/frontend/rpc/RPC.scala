@@ -6,9 +6,9 @@ import org.scalajs.dom.raw.WebSocket
 import org.scalajs.dom.{ErrorEvent, Event, MessageEvent}
 import org.xanho.web.rpc.Protocol.Heartbeat
 import org.xanho.web.rpc.{FailedRPCResultException, Messages, Protocol}
-import org.xanho.web.shared.models.{FirebaseUser, User}
+import org.xanho.web.shared.models.FirebaseUser
 import upickle.Js
-import upickle.default.{read, readJs, write}
+import upickle.default.{read, write}
 
 import scala.collection.mutable
 import scala.concurrent.{Future, Promise}
@@ -74,11 +74,13 @@ object RPC {
         rpcs.get(result.id)
           .foreach(_ success result)
       case failedResult: Messages.FailedRPCResult =>
+        println(s"Received failure $failedResult")
         rpcs.get(failedResult.id)
           .foreach(_ failure FailedRPCResultException(failedResult))
     }
 
   private def sendToServer(message: Messages.RPCMessage): Option[Promise[Messages.RPCResult]] = {
+    println(message)
     val maybePromise =
       message match {
         case r: Messages.RPC if r.responseExpected =>
@@ -96,6 +98,9 @@ object RPC {
           )
           outboundQueue.enqueue(write(r)(Messages.rpcWriter))
           Some(promise)
+        case r: Messages.RPC =>
+          outboundQueue.enqueue(write(r)(Messages.rpcWriter))
+          None
         case r: Messages.RPCResult =>
           outboundQueue.enqueue(write(r))
           None
@@ -107,19 +112,22 @@ object RPC {
     maybePromise
   }
 
-  def register(firebaseUser: FirebaseUser): Future[User] = {
+  def register(firebaseUser: FirebaseUser): Future[_] = {
     val id =
       UUID.randomUUID().toString
     sendToServer(
       Protocol.Register(
         id,
         firebaseUser,
-        ???
+        None
       )
-    )
-    val f = rpcs(id).future.map(_.value).map(readJs[User])
-    f onComplete (_ => rpcs.remove(id))
-    f
+    ).get
+      .future
+      .andThen {
+        case x =>
+          println(x)
+          rpcs.remove(id)
+      }
   }
 
   def heartbeat: Future[_] = {
@@ -138,6 +146,7 @@ object RPC {
       while (outboundQueue.nonEmpty) {
         val item =
           outboundQueue.dequeue()
+        println(s"Sending: $item")
         socket.send(item)
       }
     else

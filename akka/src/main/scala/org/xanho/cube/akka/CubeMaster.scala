@@ -1,19 +1,14 @@
 package org.xanho.cube.akka
 
-import java.util.UUID
-
-import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
+import akka.actor.{Actor, ActorContext, ActorLogging, ActorRef, ActorSystem, Props}
 import akka.pattern.ask
-import com.seancheatham.graph.adapters.memory.MutableGraph
 import com.typesafe.scalalogging.LazyLogging
-import org.xanho.cube.core.Message
 import org.xanho.utility.FutureUtility.FutureHelper
-import org.xanho.utility.data.{Buckets, DocumentStorage}
-import play.api.libs.json.Json
 
 import scala.collection.mutable
 import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.util.Success
 
 /**
   * The master cube actor, which maintains references to Cube Cluster actors.  The master also
@@ -60,12 +55,17 @@ class CubeMaster extends Actor with ActorLogging {
       orphanedCubes.enqueue(clusters(clusterId)._2.toSeq: _*)
       clusters.remove(clusterId)
 
-    case CubeMaster.Messages.CreateCube(ownerId) =>
-      log.info(s"Received create cube request from ${sender()}")
-      val cubeId =
-        createCube(ownerId)
-      orphanedCubes.enqueue(cubeId)
-      sender() ! cubeId
+    case CubeMaster.Messages.Mount(cubeIds) =>
+      Future.traverse(clusters.keys)(unassignFromCluster(_, cubeIds))
+        .map(_ => orphanedCubes.enqueue(cubeIds.toSeq: _*))
+        .map(_ => self ! CubeMaster.Messages.AssignOrphans)
+        .map(_ => sender() ! Messages.Ok)
+        .await
+
+    case CubeMaster.Messages.Dismount(cubeIds) =>
+      Future.traverse(clusters.keys)(unassignFromCluster(_, cubeIds))
+        .map(_ => sender() ! Messages.Ok)
+        .await
 
     case CubeMaster.Messages.AssignOrphans =>
       log.info(s"Received assign orphans from ${sender()}")
@@ -132,12 +132,32 @@ class CubeMaster extends Actor with ActorLogging {
     log.info(s"Assigning cubes to cluster $clusterId: $cubeIds")
     val (max, currentCubeIds) =
       clusters(clusterId)
-    askCluster(clusterId, CubeCluster.Messages.Register(cubeIds))
+    askCluster(clusterId, CubeMaster.Messages.Mount(cubeIds))
       .map(
         _ =>
           clusters
             .update(clusterId, (max, currentCubeIds ++ cubeIds))
       )
+  }
+
+  /**
+    * Assigns the given cube IDs to the given cluster.  Updates the cubeClusterAssignments map.
+    *
+    * @param clusterId The ID of the destination cluster
+    * @param cubeIds   The cube IDs to assign
+    * @return A future operation which assigns the given IDs
+    */
+  private def unassignFromCluster(clusterId: String,
+                                  cubeIds: Set[String]): Future[_] = {
+    log.info(s"Unassigning cubes from cluster $clusterId: $cubeIds")
+
+    askCluster(clusterId, CubeMaster.Messages.Dismount(cubeIds))
+      .andThen {
+        case Success(_) =>
+          val (max, currentCubeIds) =
+            clusters(clusterId)
+          clusters.update(clusterId, (max, currentCubeIds -- cubeIds))
+      }
   }
 
   /**
@@ -176,35 +196,12 @@ class CubeMaster extends Actor with ActorLogging {
           if (toOrphan.nonEmpty)
             askCluster(
               clusterId,
-              CubeCluster.Messages.Unregister(toOrphan)
+              CubeMaster.Messages.Dismount(toOrphan)
             ).await
           orphanedCubes.enqueue(toOrphan.toSeq: _*)
       }
 
     self ! CubeMaster.Messages.AssignOrphans
-  }
-
-  /**
-    * Creates a new Cube in the database
-    *
-    * @return The ID of the new cube
-    */
-  private def createCube(ownerId: String): String = {
-    val id =
-      UUID.randomUUID().toString
-    DocumentStorage.default
-      .write(Buckets.CUBES, id)(
-        Json.obj(
-          "messages" -> Seq.empty[Message],
-          "graph" -> new MutableGraph()(),
-          "data" -> Json.obj(
-            "creationDate" -> System.currentTimeMillis(),
-            "ownerId" -> ownerId
-          )
-        )
-      )
-      .map(_ => id)
-      .await
   }
 
   private def clusterRef(clusterId: String) =
@@ -222,6 +219,9 @@ object CubeMaster extends LazyLogging {
     system.actorOf(Props[CubeMaster], "cube-master")
   }
 
+  def ref(implicit context: ActorContext): Future[ActorRef] =
+    context.actorSelection(masterPath).resolveOne()
+
   object Messages {
 
     case class RegisterCluster(clusterId: String,
@@ -229,7 +229,11 @@ object CubeMaster extends LazyLogging {
 
     case class UnregisterCluster(clusterId: String)
 
-    case class CreateCube(ownerId: String)
+    case class Mount(cubeIds: Set[String])
+
+    case class Dismount(cubeIds: Set[String])
+
+    case object UnregisterAll
 
     case object AssignOrphans
 

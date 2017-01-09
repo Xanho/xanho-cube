@@ -42,7 +42,7 @@ object Protocol {
         case o: Js.Obj =>
           Register(
             o("id").str,
-            readJs[FirebaseUser](o("firebaseUser")),
+            readJs[FirebaseUser](o("arguments").obj("firebaseUser")),
             o.obj.get("authToken").map(_.str)
           )
       }

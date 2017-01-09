@@ -1,16 +1,15 @@
 package org.xanho.cube.akka.rpc
 
-import java.util.UUID
-
 import akka.actor.{Actor, ActorLogging, ActorRef}
-import org.xanho.utility.data.DocumentStorage
+import org.xanho.cube.akka._
+import org.xanho.utility.FutureUtility.FutureHelper
 import org.xanho.web.rpc.FailedRPCResultException
 import org.xanho.web.rpc.Messages.{FailedRPCResult, RPC, RPCMessage, RPCResult}
-import org.xanho.web.rpc.Protocol.Register.UserAlreadyExistsException
 import org.xanho.web.rpc.Protocol.{Heartbeat, Register}
 import play.api.libs.json._
 
 import scala.collection.mutable
+import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
 
@@ -22,19 +21,50 @@ class WebSocketActor(webActor: ActorRef)
   private val rpcs =
     mutable.Map.empty[String, Promise[RPCResult]]
 
+  private val apiActor =
+    ApiRouter.ref.await(10.seconds)
+
   private var client: Option[ActorRef] =
     None
 
-  import scala.concurrent.duration._
+  import upickle.Js
 
-  context.system.scheduler.schedule(10.seconds, 10.seconds) {
-    val id =
-      UUID.randomUUID().toString
-    sendToClient(Heartbeat(id)).get.future.onComplete {
-      case Success(_) =>
-      case o =>
-        log.error(o.toString)
-    }
+  private def receiveRPC: PartialFunction[RPCMessage, Option[Future[RPCResult]]] = {
+
+    case Heartbeat(id) =>
+      Some(
+        Future.successful(
+          RPCResult(id, Js.Obj())
+        )
+      )
+
+    case Register(id, firebaseUser, authToken) =>
+      // TODO: Validate Token
+      import akka.pattern.ask
+      import org.xanho.cube.akka.defaultAskTimeout
+      Some(
+        apiActor
+          .ask(ApiActor.Messages.Register(firebaseUser.uid))
+          .map {
+            case Messages.Ok =>
+              RPCResult(id, Js.Str(firebaseUser.uid))
+            case _ =>
+              throw FailedRPCResultException(
+                FailedRPCResult(id, Js.Str(firebaseUser.uid))
+              )
+          }
+      )
+  }
+
+  override def postStop(): Unit = {
+    rpcs
+      .foreach {
+        case (key, promise) =>
+          promise.failure(
+            new IllegalStateException("Web Socket shutting down")
+          )
+          rpcs.remove(key)
+      }
   }
 
   def receive: Receive = {
@@ -44,12 +74,14 @@ class WebSocketActor(webActor: ActorRef)
       receiveFromClient(message)
     case WebSocketActor.Messages.Send(message) =>
       sendToClient(message)
+    case o =>
+      log.warning(s"Unexpected message received: ${o.toString}")
   }
 
   private def receiveFromClient(message: RPCMessage): Unit =
     message match {
       case call: RPC =>
-        WebSocketActor.receiveRPC(call)
+        receiveRPC(call)
           .foreach(
             _.onComplete {
               case Success(result) =>
@@ -61,10 +93,10 @@ class WebSocketActor(webActor: ActorRef)
             }
           )
       case result: RPCResult =>
-        rpcs.remove(result.id)
+        rpcs.get(result.id)
           .foreach(_ success result)
       case failedResult: FailedRPCResult =>
-        rpcs.remove(failedResult.id)
+        rpcs.get(failedResult.id)
           .foreach(_ failure FailedRPCResultException(failedResult))
     }
 
@@ -74,19 +106,7 @@ class WebSocketActor(webActor: ActorRef)
         case r: RPC if r.responseExpected =>
           val promise =
             Promise[RPCResult]()
-          val rId =
-            r.id
-          rpcs.update(rId, promise)
-          import scala.concurrent.duration._
-          context.system.scheduler.scheduleOnce(10.seconds)(
-            rpcs.get(rId)
-              .foreach(_ =>
-                self ! WebSocketActor.Messages.Receive(
-                  FailedRPCResult(rId, JsString("Timed out"))
-                )
-              )
-
-          )
+          rpcs.update(r.id, promise)
           Some(promise)
         case _ =>
           None
@@ -98,28 +118,6 @@ class WebSocketActor(webActor: ActorRef)
 }
 
 object WebSocketActor {
-
-  import upickle.Js
-
-  def receiveRPC: PartialFunction[RPC, Option[Future[RPCResult]]] = {
-    case Heartbeat(id) =>
-      Some(
-        Future.successful(
-          RPCResult(id, Js.Obj())
-        )
-      )
-    case Register(id, firebaseUser, authToken) =>
-      // TODO: Validate Token
-      Some(
-        DocumentStorage().get("users", firebaseUser.uid)
-        .map {
-          case Some(v) =>
-            Future.failed(UserAlreadyExistsException)
-          case None =>
-            DocumentStorage().write("users")
-        }
-      )
-  }
 
   object Messages {
 
