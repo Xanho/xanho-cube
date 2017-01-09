@@ -13,12 +13,10 @@ import akka.pattern.ask
 import akka.routing.RoundRobinPool
 import akka.stream.ActorMaterializer
 import com.seancheatham.graph.adapters.memory.MutableGraph
-import de.heikoseeberger.akkahttpplayjson.PlayJsonSupport._
-import org.xanho.cube.akka.api.{authenticator, models, realm}
 import org.xanho.cube.core.Message
 import org.xanho.utility.FutureUtility.FutureHelper
 import org.xanho.utility.data.{Buckets, DocumentStorage}
-import play.api.libs.json.{JsObject, JsString, JsValue, Json}
+import play.api.libs.json.{JsString, Json}
 
 import scala.concurrent.Future
 import scala.concurrent.duration.Duration
@@ -51,39 +49,49 @@ class ApiActor(id: String,
     */
   private val routes: Route = {
 
-    val userRoutes =
-      authenticateOAuth2Async(realm, authenticator) {
-        case (token: String, userId: String, userEmail: String) =>
-          path("users" / Segment)(id =>
-            if (userId != id)
-              complete(StatusCodes.Unauthorized)
-            else
-              get(
-                onSuccess(models.User.get(userId))(
-                  _.fold(complete(StatusCodes.NotFound))(complete(_))
-                )
-              ) ~
-                post(
-                  entity(as[Map[String, JsValue]].map(JsObject(_).as[models.User]))(
-                    user =>
-                      onSuccess(
-                        self.ask(ApiActor.Messages.Register(userId))
-                          .map(_ => models.User.merge(userId)(Json.toJson(user)))
-                      )(_ => complete(StatusCodes.Created))
-                  )
-                ) ~
-                put(
-                  entity(as[Map[String, JsValue]].map(JsObject(_).as[models.User]))(
-                    user =>
-                      onSuccess(
-                        models.User.merge(userId)(Json.toJson(user))
-                      )(_ => complete(StatusCodes.Created))
-                  )
-                )
-          )
-      }
+//    import de.heikoseeberger.akkahttpplayjson.PlayJsonSupport._
+    //    import org.xanho.cube.akka.api.{authenticator, models, realm}
+//    val userRoutes =
+//      authenticateOAuth2Async(realm, authenticator) {
+//        case (token: String, userId: String, userEmail: String) =>
+//          path("users" / Segment)(id =>
+//            if (userId != id)
+//              complete(StatusCodes.Unauthorized)
+//            else
+//              get(
+//                onSuccess(models.User.get(userId))(
+//                  _.fold(complete(StatusCodes.NotFound))(complete(_))
+//                )
+//              ) ~
+//                post(
+//                  entity(as[Map[String, JsValue]].map(JsObject(_).as[models.User]))(
+//                    user =>
+//                      onSuccess(
+//                        self.ask(ApiActor.Messages.Register(userId))
+//                          .map(_ => models.User.merge(userId)(Json.toJson(user)))
+//                      )(_ => complete(StatusCodes.Created))
+//                  )
+//                ) ~
+//                put(
+//                  entity(as[Map[String, JsValue]].map(JsObject(_).as[models.User]))(
+//                    user =>
+//                      onSuccess(
+//                        models.User.merge(userId)(Json.toJson(user))
+//                      )(_ => complete(StatusCodes.Created))
+//                  )
+//                )
+//          )
+//      }
 
-    userRoutes
+    val cubeRoutes =
+      path("cubes" / Segment / "mount")(cubeId =>
+        onSuccess(mountCube(cubeId))(_ => complete(StatusCodes.OK))
+      ) ~
+        path("cubes" / Segment / "dismount")(cubeId =>
+          onSuccess(dismountCube(cubeId))(_ => complete(StatusCodes.OK))
+        )
+
+    cubeRoutes
 
   }
 
@@ -160,12 +168,19 @@ class ApiActor(id: String,
           )
         )
       )
-      .flatMap(_ => cubeMaster ? CubeMaster.Messages.Mount(Set(id)))
-      .collect {
-        case Messages.Ok =>
-          id
-      }
+      .flatMap(_ => mountCube(id))
+      .map(_ => id)
   }
+
+  private def mountCube(cubeId: String): Future[_] =
+    cubeMaster
+      .ask(CubeMaster.Messages.Mount(Set(cubeId)))
+      .filter(_ == Messages.Ok)
+
+  private def dismountCube(cubeId: String): Future[_] =
+    cubeMaster
+      .ask(CubeMaster.Messages.Dismount(Set(cubeId)))
+      .filter(_ == Messages.Ok)
 }
 
 import com.typesafe.scalalogging.LazyLogging

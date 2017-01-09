@@ -23,7 +23,9 @@ class CubeMaster extends Actor with ActorLogging {
     * A set of cluster IDs
     */
   private val clusters =
-    mutable.Map.empty[String, (Int, Set[String])]
+    mutable.Map[ActorRef, (Int, Set[String])](
+      context.actorOf(CubeCluster.props("1", 20)) -> (20, Set.empty[String])
+    )
 
   /**
     * A queue of cubes which have been orphaned, and need a new parent
@@ -44,16 +46,22 @@ class CubeMaster extends Actor with ActorLogging {
     */
   def receive: Receive = {
 
-    case CubeMaster.Messages.RegisterCluster(clusterId, maximumCapacity) =>
-      log.info(s"Received register request with ID $clusterId from ${sender()}")
-      clusters.update(clusterId, (maximumCapacity, Set.empty[String]))
-      sender() ! Messages.Ok
+    case CubeMaster.Messages.RegisterCluster(maximumCapacity) =>
+      val s = sender()
+      log.info(s"Received register request from $s")
+      clusters.get(s) match {
+        case Some((_, cubeIds)) =>
+          orphanedCubes.enqueue(cubeIds.toSeq: _*)
+      }
+      clusters.update(s, (maximumCapacity, Set.empty[String]))
+      s ! Messages.Ok
       balanceClusters()
 
-    case CubeMaster.Messages.UnregisterCluster(clusterId) =>
-      log.info(s"Received unregister request with ID $clusterId from ${sender()}")
-      orphanedCubes.enqueue(clusters(clusterId)._2.toSeq: _*)
-      clusters.remove(clusterId)
+    case CubeMaster.Messages.UnregisterCluster =>
+      val s = sender()
+      log.info(s"Received unregister request from $s")
+      orphanedCubes.enqueue(clusters(s)._2.toSeq: _*)
+      clusters.remove(s)
 
     case CubeMaster.Messages.Mount(cubeIds) =>
       Future.traverse(clusters.keys)(unassignFromCluster(_, cubeIds))
@@ -82,18 +90,18 @@ class CubeMaster extends Actor with ActorLogging {
   /**
     * Unload the given cluster ID, instructing it to shut down each of its
     *
-    * @param clusterId The ID of the cluster to instruct to shut down
+    * @param cluster The ID of the cluster to instruct to shut down
     * @return A future operation which unloads the cluster
     */
-  private def unloadCluster(clusterId: String): Future[_] = {
+  private def unloadCluster(cluster: ActorRef): Future[_] = {
     import akka.pattern.gracefulStop
 
-    if (clusters contains clusterId)
-      gracefulStop(clusterRef(clusterId), 30.seconds)
+    if (clusters contains cluster)
+      gracefulStop(cluster, 30.seconds)
         .map {
           _ =>
-            orphanedCubes.enqueue(clusters(clusterId)._2.toSeq: _*)
-            clusters.remove(clusterId)
+            orphanedCubes.enqueue(clusters(cluster)._2.toSeq: _*)
+            clusters.remove(cluster)
         }
     else
       Future.successful()
@@ -123,40 +131,40 @@ class CubeMaster extends Actor with ActorLogging {
   /**
     * Assigns the given cube IDs to the given cluster.  Updates the cubeClusterAssignments map.
     *
-    * @param clusterId The ID of the destination cluster
-    * @param cubeIds   The cube IDs to assign
+    * @param cluster The reference to the actor to assign to
+    * @param cubeIds The cube IDs to assign
     * @return A future operation which assigns the given IDs
     */
-  private def assignToCluster(clusterId: String,
+  private def assignToCluster(cluster: ActorRef,
                               cubeIds: Set[String]): Future[_] = {
-    log.info(s"Assigning cubes to cluster $clusterId: $cubeIds")
+    log.info(s"Assigning cubes to cluster $cluster: $cubeIds")
     val (max, currentCubeIds) =
-      clusters(clusterId)
-    askCluster(clusterId, CubeMaster.Messages.Mount(cubeIds))
+      clusters(cluster)
+    cluster.ask(CubeMaster.Messages.Mount(cubeIds))
       .map(
         _ =>
           clusters
-            .update(clusterId, (max, currentCubeIds ++ cubeIds))
+            .update(cluster, (max, currentCubeIds ++ cubeIds))
       )
   }
 
   /**
     * Assigns the given cube IDs to the given cluster.  Updates the cubeClusterAssignments map.
     *
-    * @param clusterId The ID of the destination cluster
-    * @param cubeIds   The cube IDs to assign
+    * @param cluster The reference to the actor to unassign from
+    * @param cubeIds The cube IDs to assign
     * @return A future operation which assigns the given IDs
     */
-  private def unassignFromCluster(clusterId: String,
+  private def unassignFromCluster(cluster: ActorRef,
                                   cubeIds: Set[String]): Future[_] = {
-    log.info(s"Unassigning cubes from cluster $clusterId: $cubeIds")
+    log.info(s"Unassigning cubes from cluster $cluster: $cubeIds")
 
-    askCluster(clusterId, CubeMaster.Messages.Dismount(cubeIds))
+    cluster.ask(CubeMaster.Messages.Dismount(cubeIds))
       .andThen {
         case Success(_) =>
           val (max, currentCubeIds) =
-            clusters(clusterId)
-          clusters.update(clusterId, (max, currentCubeIds -- cubeIds))
+            clusters(cluster)
+          clusters.update(cluster, (max, currentCubeIds -- cubeIds))
       }
   }
 
@@ -190,14 +198,14 @@ class CubeMaster extends Actor with ActorLogging {
   private def balanceClusters(): Unit = {
     clusters
       .foreach {
-        case (clusterId, (targetSize, cubeIds)) =>
+        case (cluster, (targetSize, cubeIds)) =>
           val toOrphan =
             cubeIds.drop(targetSize)
           if (toOrphan.nonEmpty)
-            askCluster(
-              clusterId,
-              CubeMaster.Messages.Dismount(toOrphan)
-            ).await
+            cluster
+              .ask(
+                CubeMaster.Messages.Dismount(toOrphan)
+              ).await
           orphanedCubes.enqueue(toOrphan.toSeq: _*)
       }
 
@@ -205,10 +213,7 @@ class CubeMaster extends Actor with ActorLogging {
   }
 
   private def clusterRef(clusterId: String) =
-    context.actorSelection(
-      clusterPath(clusterId)
-    ).resolveOne()
-      .await
+    context.actorSelection(clusterPath(clusterId)).resolveOne().await
 }
 
 object CubeMaster extends LazyLogging {
@@ -224,10 +229,9 @@ object CubeMaster extends LazyLogging {
 
   object Messages {
 
-    case class RegisterCluster(clusterId: String,
-                               maximumCapacity: Int)
+    case class RegisterCluster(maximumCapacity: Int)
 
-    case class UnregisterCluster(clusterId: String)
+    case object UnregisterCluster
 
     case class Mount(cubeIds: Set[String])
 

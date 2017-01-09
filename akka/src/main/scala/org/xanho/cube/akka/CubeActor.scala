@@ -68,17 +68,12 @@ class CubeActor(cubeId: String) extends Actor with ActorLogging {
     */
   def receive: Receive = {
     case message: Message =>
-      val isSelf =
-        message.sourceId == cubeId
-      log.info(s"Received${if (isSelf) " (self)" else ""} message: $message")
       cube = cube receive message
 
     case Messages.Status =>
-      log.info("Received status request")
       sender() ! Messages.Ok
 
     case CubeActor.Messages.SaveData =>
-      log.info("Received save data request")
       saveCube().await
   }
 

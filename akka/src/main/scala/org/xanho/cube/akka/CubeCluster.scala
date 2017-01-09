@@ -36,18 +36,6 @@ class CubeCluster(id: String,
   private val cubeActors =
     mutable.Map.empty[String, ActorRef]
 
-  /**
-    * Register this cluster right away, erroring out if it can't
-    */
-  Await.result(
-    cubeMaster ? CubeMaster.Messages.RegisterCluster(id, maximumCapacity),
-    defaultTimeout
-  ) match {
-    case Messages.Ok =>
-    case _ =>
-      throw new IllegalStateException("Unable to register with master")
-  }
-
   def receive: Receive = {
     case CubeMaster.Messages.Mount(cubeIds) =>
       log.info(s"Received cube registration request for cube IDs: $cubeIds")

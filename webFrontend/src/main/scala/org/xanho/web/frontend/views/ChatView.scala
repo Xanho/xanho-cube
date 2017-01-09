@@ -21,6 +21,37 @@ class ChatView(model: ModelProperty[ChatViewModel],
 
   import scalatags.JsDom.all._
 
+  private def messages =
+    div(
+      ul(
+        repeat(
+          model.subSeq(_.messages)
+        )(message =>
+          li(
+            ul(
+              li(
+                b("Source ID: "),
+                bind(message.asModel.subProp(_.sourceId))
+              ),
+              li(
+                b("Destination ID: "),
+                bind(message.asModel.subProp(_.destinationId))
+              ),
+              li(
+                b("Message Text: "),
+                bind(message.asModel.subProp(_.text))
+              ),
+              li(
+                b("Timestamp: "),
+                bind(message.asModel.subProp(_.timestamp))
+              )
+            ),
+            br
+          ).render
+        )
+      )
+    )
+
   def getTemplate: TypedTag[Div] =
     div(
       p(
@@ -32,35 +63,7 @@ class ChatView(model: ModelProperty[ChatViewModel],
           )
         )
       ),
-      div(
-        ul(
-          repeat(
-            model.subSeq(_.messages)
-          )(message =>
-            li(
-              ul(
-                li(
-                  b("Source ID: "),
-                  bind(message.asModel.subProp(_.sourceId))
-                ),
-                li(
-                  b("Destination ID: "),
-                  bind(message.asModel.subProp(_.destinationId))
-                ),
-                li(
-                  b("Message Text: "),
-                  bind(message.asModel.subProp(_.text))
-                ),
-                li(
-                  b("Timestamp: "),
-                  bind(message.asModel.subProp(_.timestamp))
-                )
-              ),
-              br
-            ).render
-          )
-        )
-      ),
+      messages.render,
       TextInput.debounced(model.subProp(_.currentUserText))(),
       button(
         onclick :+= ((_: Event) => presenter.sendMessage())
