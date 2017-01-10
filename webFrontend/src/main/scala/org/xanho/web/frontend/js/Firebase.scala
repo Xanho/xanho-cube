@@ -132,6 +132,10 @@ trait Reference extends js.Object {
          cancelCallbackOrContext: js.UndefOr[js.Function1[js.Error, Unit]],
          context: js.UndefOr[js.Any]): Unit = js.native
 
+  def off(eventType: js.UndefOr[String],
+          callback: js.UndefOr[js.Function1[DataSnapshot, Unit]],
+          context: js.UndefOr[js.Any]): Unit = js.native
+
 }
 
 @js.native

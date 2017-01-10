@@ -16,6 +16,9 @@ import scala.util.{Failure, Success}
 
 object RPC {
 
+  private val wsAddress =
+    "ws://localhost:8000"
+
   import org.xanho.web.frontend.Context.executionContext
 
   private val rpcs =
@@ -25,7 +28,7 @@ object RPC {
     Promise[Boolean]()
 
   private val socket =
-    new WebSocket("ws://localhost:8080/ws")
+    new WebSocket(s"$wsAddress/ws")
 
   socket.onopen = {
     (_: Event) =>

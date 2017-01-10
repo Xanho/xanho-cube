@@ -107,6 +107,3 @@ lazy val webFrontend =
       artifactPath in(Compile, packageScalaJSLauncher) :=
         (crossTarget in(Compile, packageScalaJSLauncher)).value / StaticFilesDir / WebContent / "scripts" / "frontend-init.js"
     )
-    .settings(
-      bootSnippet := "org.xanho.web.frontend.Init().main();"
-    )

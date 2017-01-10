@@ -7,8 +7,8 @@ import upickle.Js
 
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.scalajs.js
-import scala.scalajs.js._
 import scala.scalajs.js.JSConverters._
+import scala.scalajs.js._
 import scala.util.Try
 
 object Database {
@@ -61,6 +61,9 @@ object Database {
     promise.future
   }
 
+  private val listeners =
+    scala.collection.mutable.Map.empty[String, (String, js.Function1[DataSnapshot, Unit])]
+
   def listen(bucket: String, key: String*)
             (handler: (String, Js.Value => Unit))
             (implicit ec: ExecutionContext): String = {
@@ -78,7 +81,10 @@ object Database {
         throw new Exception(error.message)
         ()
       }
-    ref(bucket, key)
+    val path =
+      (bucket +: key).mkString("/")
+    listeners += (id -> (path, onSuccess))
+    ref(path)
       .on(
         handler._1,
         Some(onSuccess).orUndefined,
@@ -87,6 +93,18 @@ object Database {
       )
     id
   }
+
+  def unlisten(id: String): Unit =
+    listeners.remove(id)
+      .foreach {
+        case (path, listener) =>
+          ref(path)
+            .off(
+              None.orUndefined,
+              listener,
+              None.orUndefined
+            )
+      }
 
   /**
     * A specialized version of [[org.xanho.web.frontend.utility.Database#get(java.lang.String, scala.collection.Seq, scala.concurrent.ExecutionContext)]]
@@ -147,10 +165,13 @@ object Database {
         JSON.parse(upickle.json.write(value)),
         None.orUndefined
       )
-    .toFuture
-    .map(_.key)
+      .toFuture
+      .map(_.key)
 
   object Listeners {
+
+    def value(f: Js.Value => Unit): (String, Js.Value => Unit) =
+      ("value", f)
 
     def childAdded(f: Js.Value => Unit): (String, Js.Value => Unit) =
       ("child_added", f)

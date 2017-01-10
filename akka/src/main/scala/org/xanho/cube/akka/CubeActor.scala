@@ -20,6 +20,9 @@ class CubeActor(cubeId: String) extends Actor with ActorLogging {
 
   import context.dispatcher
 
+  private val startTime =
+    System.currentTimeMillis()
+
   /**
     * This Actor's corresponding cube.  When the actor is initialized, it must fetch the cube
     * from storage, which may take a while.  This step will block until complete.
@@ -67,8 +70,11 @@ class CubeActor(cubeId: String) extends Actor with ActorLogging {
     * @return
     */
   def receive: Receive = {
-    case message: Message =>
+    case message: Message if message.timestamp > startTime =>
       cube = cube receive message
+
+    case message: Message =>
+      cube = cube appended message
 
     case Messages.Status =>
       sender() ! Messages.Ok

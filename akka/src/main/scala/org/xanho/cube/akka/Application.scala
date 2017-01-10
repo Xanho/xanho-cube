@@ -18,19 +18,6 @@ object Application extends App {
           val port =
             config.getInt("xanho.api.port")
           ApiRouter.initialize(host = host, port = port)
-
-        case "web" =>
-          val host =
-            config.getString("xanho.web.host")
-          val port =
-            config.getInt("xanho.web.port")
-          val resourceBasePath =
-            config.getString("xanho.web.path")
-          WebRouter.initialize(
-            host = host,
-            port = port,
-            resourceBasePath = resourceBasePath
-          )
       }
   }
 

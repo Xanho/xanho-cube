@@ -2,21 +2,26 @@ package org.xanho.cube.akka
 
 import java.util.UUID
 
-import akka.actor.{Actor, ActorContext, ActorLogging, ActorRef, ActorSystem, Props}
+import akka.NotUsed
+import akka.actor.{Actor, ActorContext, ActorLogging, ActorRef, ActorSystem, PoisonPill, Props}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.Http.ServerBinding
 import akka.http.scaladsl.model.StatusCodes
+import akka.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.http.scaladsl.server.RouteResult.route2HandlerFlow
 import akka.pattern.ask
 import akka.routing.RoundRobinPool
-import akka.stream.ActorMaterializer
+import akka.stream.{ActorMaterializer, OverflowStrategy}
+import akka.stream.scaladsl.{Flow, Sink, Source}
+import akka.util.ByteString
 import com.seancheatham.graph.adapters.memory.MutableGraph
-import org.xanho.cube.core.Message
+import org.xanho.cube.akka.rpc.WebSocketActor
 import org.xanho.utility.FutureUtility.FutureHelper
 import org.xanho.utility.data.{Buckets, DocumentStorage}
-import play.api.libs.json.{JsString, Json}
+import org.xanho.web.rpc.Messages.RPCMessage
+import play.api.libs.json.{JsString, JsValue, Json}
 
 import scala.concurrent.Future
 import scala.concurrent.duration.Duration
@@ -49,39 +54,10 @@ class ApiActor(id: String,
     */
   private val routes: Route = {
 
-//    import de.heikoseeberger.akkahttpplayjson.PlayJsonSupport._
-    //    import org.xanho.cube.akka.api.{authenticator, models, realm}
-//    val userRoutes =
-//      authenticateOAuth2Async(realm, authenticator) {
-//        case (token: String, userId: String, userEmail: String) =>
-//          path("users" / Segment)(id =>
-//            if (userId != id)
-//              complete(StatusCodes.Unauthorized)
-//            else
-//              get(
-//                onSuccess(models.User.get(userId))(
-//                  _.fold(complete(StatusCodes.NotFound))(complete(_))
-//                )
-//              ) ~
-//                post(
-//                  entity(as[Map[String, JsValue]].map(JsObject(_).as[models.User]))(
-//                    user =>
-//                      onSuccess(
-//                        self.ask(ApiActor.Messages.Register(userId))
-//                          .map(_ => models.User.merge(userId)(Json.toJson(user)))
-//                      )(_ => complete(StatusCodes.Created))
-//                  )
-//                ) ~
-//                put(
-//                  entity(as[Map[String, JsValue]].map(JsObject(_).as[models.User]))(
-//                    user =>
-//                      onSuccess(
-//                        models.User.merge(userId)(Json.toJson(user))
-//                      )(_ => complete(StatusCodes.Created))
-//                  )
-//                )
-//          )
-//      }
+    val wsRoute =
+      path("ws")(
+        get(handleWebSocketMessages(webSocket()))
+      )
 
     val cubeRoutes =
       path("cubes" / Segment / "mount")(cubeId =>
@@ -91,7 +67,8 @@ class ApiActor(id: String,
           onSuccess(dismountCube(cubeId))(_ => complete(StatusCodes.OK))
         )
 
-    cubeRoutes
+    wsRoute ~
+      cubeRoutes
 
   }
 
@@ -160,7 +137,7 @@ class ApiActor(id: String,
     DocumentStorage.default
       .write(Buckets.CUBES, id)(
         Json.obj(
-          "messages" -> Seq.empty[Message],
+          "messages" -> Seq.empty[JsValue],
           "graph" -> new MutableGraph()(),
           "data" -> Json.obj(
             "creationDate" -> System.currentTimeMillis(),
@@ -181,6 +158,45 @@ class ApiActor(id: String,
     cubeMaster
       .ask(CubeMaster.Messages.Dismount(Set(cubeId)))
       .filter(_ == Messages.Ok)
+
+  private def webSocket(): Flow[Message, Message, NotUsed] = {
+    val actor =
+      context.system.actorOf(Props(new WebSocketActor(self)))
+    import upickle.Js
+    import upickle.default.write
+
+    val incomingMessages: Sink[Message, NotUsed] =
+      Flow[Message].map {
+        case TextMessage.Strict(text) =>
+          val json =
+            Json.parse(text)
+          import org.xanho.cube.akka.rpc.playToUPickle
+          val message =
+            RPCMessage.read(playToUPickle(json).asInstanceOf[Js.Obj])
+          WebSocketActor.Messages.Receive(message)
+        case TextMessage.Streamed(textStream) =>
+          ???
+        case BinaryMessage.Strict(data: ByteString) =>
+          ???
+        case BinaryMessage.Streamed(dataStream) =>
+          ???
+      }.to(Sink.actorRef(actor, PoisonPill))
+
+    val outgoingMessages: Source[Message, NotUsed] =
+      Source.actorRef[RPCMessage](10, OverflowStrategy.fail)
+        .mapMaterializedValue {
+          outActor =>
+            actor ! WebSocketActor.Messages.Connected(outActor)
+            NotUsed
+        }.map(
+        rpcMessage =>
+          TextMessage(
+            write[RPCMessage](rpcMessage)(org.xanho.web.rpc.Messages.writeRPCMessage)
+          )
+      )
+
+    Flow.fromSinkAndSource(incomingMessages, outgoingMessages)
+  }
 }
 
 import com.typesafe.scalalogging.LazyLogging

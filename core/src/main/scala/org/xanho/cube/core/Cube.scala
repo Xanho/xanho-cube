@@ -38,11 +38,20 @@ case class Cube(id: String,
     */
   def receive(message: Message): Cube = {
     val newCube =
-      copy(messages = messages :+ message)(sendMessage)
+      this appended message
     if(message.sourceId != id)
       sendMessage(message.sourceId, s"Hello ${message.sourceId}.  You said: ${message.text}")
     newCube
   }
+
+  /**
+    * Returns a cube with the given message appended
+    *
+    * @param message The message to append
+    * @return a new Cube
+    */
+  def appended(message: Message): Cube =
+    copy(messages = messages :+ message)(sendMessage)
 
   /**
     * Get the ID of the owner of this cube

@@ -1,14 +1,11 @@
 package org.xanho.web.frontend.utility
 
-import java.util.NoSuchElementException
-
 import org.xanho.web.frontend.js.ImportedJS.firebase
 import org.xanho.web.frontend.js.`firebase.auth.GoogleAuthProvider`
-import org.xanho.web.frontend.rpc.RPC
 import org.xanho.web.frontend.{js => jsLib}
 import org.xanho.web.shared.models.FirebaseUser
 
-import scala.concurrent.Future
+import scala.concurrent.{Future, Promise}
 import scala.scalajs.js
 
 object Auth {
@@ -51,23 +48,19 @@ object Auth {
   implicit class FirebaseUserHelper(firebaseUser: FirebaseUser) {
 
     import org.xanho.web.shared.models
-    import upickle.Js
     import upickle.default.readJs
 
     def toUser: Future[models.User] = {
-      def fetchUser(tries: Int = 4): Future[Js.Value] =
-        if (tries > 0)
-          Database.get("users", firebaseUser.uid)
-            .recoverWith {
-              case _: NoSuchElementException =>
-                RPC.register(firebaseUser)
-                  .flatMap(_ => fetchUser(tries - 1))
-            }
-        else
-          Future.failed(new NoSuchElementException(firebaseUser.uid))
-
-      fetchUser()
-        .map(readJs(_)(models.User.reader(firebaseUser.uid, firebaseUser.email)))
+      val promise =
+        Promise[models.User]()
+      val listenerId =
+        Database.listen("users", firebaseUser.uid)(
+          Database.Listeners.value(
+            promise success readJs(_)(models.User.reader(firebaseUser.uid, firebaseUser.email))
+          )
+        )
+      promise.future
+        .andThen { case _ => Database.unlisten(listenerId) }
     }
   }
 

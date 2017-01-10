@@ -8,7 +8,6 @@ object Dependencies {
     val udashVersion = "0.4.0"
     val udashJQueryVersion = "1.0.0"
     val logbackVersion = "1.1.3"
-    val jettyVersion = "9.3.15.v20161220"
     val upickleVersion = "0.4.3"
   }
 
