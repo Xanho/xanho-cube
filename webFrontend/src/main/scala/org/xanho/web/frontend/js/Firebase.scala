@@ -85,7 +85,6 @@ trait UserInfo extends js.Object {
   val uid: String = js.native
 }
 
-@JSName("firebase.auth.AuthProvider")
 @js.native
 trait AuthProvider extends js.Object
 

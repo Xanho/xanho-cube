@@ -23,9 +23,7 @@ class CubeMaster extends Actor with ActorLogging {
     * A set of cluster IDs
     */
   private val clusters =
-    mutable.Map[ActorRef, (Int, Set[String])](
-      context.actorOf(CubeCluster.props("1", 20)) -> (20, Set.empty[String])
-    )
+    mutable.Map.empty[ActorRef, (Int, Set[String])]
 
   /**
     * A queue of cubes which have been orphaned, and need a new parent
@@ -52,6 +50,7 @@ class CubeMaster extends Actor with ActorLogging {
       clusters.get(s) match {
         case Some((_, cubeIds)) =>
           orphanedCubes.enqueue(cubeIds.toSeq: _*)
+        case _ =>
       }
       clusters.update(s, (maximumCapacity, Set.empty[String]))
       s ! Messages.Ok
@@ -229,17 +228,17 @@ object CubeMaster extends LazyLogging {
 
   object Messages {
 
-    case class RegisterCluster(maximumCapacity: Int)
+    case class RegisterCluster(maximumCapacity: Int) extends ActorMessage
 
-    case object UnregisterCluster
+    case object UnregisterCluster extends ActorMessage
 
-    case class Mount(cubeIds: Set[String])
+    case class Mount(cubeIds: Set[String]) extends ActorMessage
 
-    case class Dismount(cubeIds: Set[String])
+    case class Dismount(cubeIds: Set[String]) extends ActorMessage
 
-    case object UnregisterAll
+    case object UnregisterAll extends ActorMessage
 
-    case object AssignOrphans
+    case object AssignOrphans extends ActorMessage
 
   }
 

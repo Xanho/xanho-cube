@@ -3,7 +3,11 @@ import UdashBuild._
 lazy val commonSettings =
   Seq(
     organization := "org.xanho",
-    scalaVersion := "2.11.8",
+    scalaVersion := "2.11.8"
+  )
+
+lazy val commonDependencySetting =
+  Seq(
     libraryDependencies ++=
       Dependencies.playJson ++
         Dependencies.typesafe ++
@@ -15,6 +19,7 @@ lazy val cube =
   project
     .in(file("."))
     .settings(commonSettings: _*)
+    .settings(commonDependencySetting: _*)
     .settings(packagedArtifacts := Map.empty)
     .aggregate(utility, cubeCore, cubeAkka, webFrontend, webSharedJVM, webSharedJS)
 
@@ -22,6 +27,7 @@ lazy val utility =
   project
     .in(file("utility"))
     .settings(commonSettings: _*)
+    .settings(commonDependencySetting: _*)
     .settings(
       name := "cube-utility",
       libraryDependencies ++=
@@ -33,6 +39,7 @@ lazy val cubeCore =
   project
     .in(file("core"))
     .settings(commonSettings: _*)
+    .settings(commonDependencySetting: _*)
     .settings(
       name := "cube-core",
       libraryDependencies ++=
@@ -44,6 +51,7 @@ lazy val cubeAkka =
   project
     .in(file("akka"))
     .settings(commonSettings: _*)
+    .settings(commonDependencySetting: _*)
     .settings(
       name := "cube-akka",
       libraryDependencies ++=

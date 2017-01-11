@@ -91,15 +91,12 @@ object Dependencies {
         "io.udash" %%% "udash-jquery" % versions.udashJQueryVersion,
         "io.udash" %%% "udash-rpc-frontend" % versions.udashVersion,
         "com.github.japgolly.scalacss" %%% "core" % "0.5.0",
-        "com.github.japgolly.scalacss" %%% "ext-scalatags" % "0.5.0"
+        "com.github.japgolly.scalacss" %%% "ext-scalatags" % "0.5.0",
+        "eu.unicredit" %%% "shocon" % "0.1.7"
       )
     )
 
   val frontendJSDeps =
-    Def.setting(
-      Seq[org.scalajs.sbtplugin.JSModuleID](
-        "org.webjars" % "firebase" % "3.2.0" / "firebase.js"
-      )
-    )
+    Def.setting(Seq[org.scalajs.sbtplugin.JSModuleID]())
 
 }

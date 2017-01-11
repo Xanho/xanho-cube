@@ -4,6 +4,7 @@ import java.util.UUID
 
 import org.scalajs.dom.raw.WebSocket
 import org.scalajs.dom.{ErrorEvent, Event, MessageEvent}
+import org.xanho.web.frontend.config.Config
 import org.xanho.web.rpc.Protocol.Heartbeat
 import org.xanho.web.rpc.{FailedRPCResultException, Messages, Protocol}
 import org.xanho.web.shared.models.FirebaseUser
@@ -17,7 +18,7 @@ import scala.util.{Failure, Success}
 object RPC {
 
   private val wsAddress =
-    "ws://localhost:8000"
+    Config.getString("xanho.ws.address")
 
   import org.xanho.web.frontend.Context.executionContext
 
@@ -28,7 +29,7 @@ object RPC {
     Promise[Boolean]()
 
   private val socket =
-    new WebSocket(s"$wsAddress/ws")
+    new WebSocket(s"$wsAddress")
 
   socket.onopen = {
     (_: Event) =>

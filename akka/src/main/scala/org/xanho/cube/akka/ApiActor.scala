@@ -203,6 +203,17 @@ import com.typesafe.scalalogging.LazyLogging
 
 object ApiActor extends LazyLogging {
 
+  def initialize(host: String,
+                 port: Int)
+                (implicit system: ActorSystem = defaultSystem): ActorRef = {
+    logger.info(s"Starting an API actor")
+    val id = UUID.randomUUID().toString
+    system.actorOf(
+      ApiActor.props(id, host, port),
+      s"api-$id"
+    )
+  }
+
   def props(id: String,
             host: String,
             port: Int): Props =
@@ -211,7 +222,7 @@ object ApiActor extends LazyLogging {
 
   object Messages {
 
-    case class Register(userId: String)
+    case class Register(userId: String) extends ActorMessage
 
   }
 

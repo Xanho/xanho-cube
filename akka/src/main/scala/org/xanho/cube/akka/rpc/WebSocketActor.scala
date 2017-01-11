@@ -2,27 +2,22 @@ package org.xanho.cube.akka.rpc
 
 import akka.actor.{Actor, ActorLogging, ActorRef}
 import org.xanho.cube.akka._
-import org.xanho.utility.FutureUtility.FutureHelper
 import org.xanho.web.rpc.FailedRPCResultException
 import org.xanho.web.rpc.Messages.{FailedRPCResult, RPC, RPCMessage, RPCResult}
 import org.xanho.web.rpc.Protocol.{Heartbeat, Register}
 import play.api.libs.json._
 
 import scala.collection.mutable
-import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
 
-class WebSocketActor(webActor: ActorRef)
+class WebSocketActor(apiActor: ActorRef)
   extends Actor with ActorLogging {
 
   import context.dispatcher
 
   private val rpcs =
     mutable.Map.empty[String, Promise[RPCResult]]
-
-  private val apiActor =
-    ApiRouter.ref.await(10.seconds)
 
   private var client: Option[ActorRef] =
     None

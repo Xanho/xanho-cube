@@ -36,7 +36,7 @@ object Init extends JSApp with StrictLogging {
 
   @JSExport
   override def main(): Unit = {
-
+    import org.xanho.web.frontend.config.Config
     jQ(document).ready((_: Element) => {
       val appRoot = jQ("#application").get(0)
       if (appRoot.isEmpty) {
@@ -44,11 +44,11 @@ object Init extends JSApp with StrictLogging {
       } else {
         ImportedJS.firebase.initializeApp(
           new FirebaseConfig(
-            "AIzaSyDZsFvxRELTzcvjkCa_JHNsVu3bJg5B6e8",
-            "xanho-151422.firebaseapp.com",
-            "https://xanho-151422.firebaseio.com",
-            "xanho-151422.appspot.com",
-            "943127112483"
+            Config.getString("firebase.apikKey"),
+            Config.getString("firebase.authDomain"),
+            Config.getString("firebase.databaseURL"),
+            Config.getString("firebase.storageBucket"),
+            Config.getString("firebase.messageSenderId")
           )
         )
 

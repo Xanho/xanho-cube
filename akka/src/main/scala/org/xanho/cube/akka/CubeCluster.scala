@@ -36,6 +36,10 @@ class CubeCluster(id: String,
   private val cubeActors =
     mutable.Map.empty[String, ActorRef]
 
+  context.system.scheduler.scheduleOnce(0.seconds)(
+    cubeMaster ! CubeMaster.Messages.RegisterCluster(maximumCapacity)
+  )
+
   def receive: Receive = {
     case CubeMaster.Messages.Mount(cubeIds) =>
       log.info(s"Received cube registration request for cube IDs: $cubeIds")
@@ -123,7 +127,7 @@ object CubeCluster extends LazyLogging {
 
   object Messages {
 
-    case class Status(cubeIds: Set[String])
+    case class Status(cubeIds: Set[String]) extends ActorMessage
 
   }
 

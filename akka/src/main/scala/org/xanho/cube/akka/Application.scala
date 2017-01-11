@@ -9,6 +9,7 @@ object Application extends App {
       args(i + 1) match {
         case "cube-master" =>
           CubeMaster.initialize()
+
         case "cube-cluster" =>
           CubeCluster.initialize()
 
@@ -17,7 +18,7 @@ object Application extends App {
             config.getString("xanho.api.host")
           val port =
             config.getInt("xanho.api.port")
-          ApiRouter.initialize(host = host, port = port)
+          ApiActor.initialize(host, port)
       }
   }
 

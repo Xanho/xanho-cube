@@ -173,7 +173,7 @@ object CubeActor {
 
   object Messages {
 
-    case object SaveData
+    case object SaveData extends ActorMessage
 
   }
 
