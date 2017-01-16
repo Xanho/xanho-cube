@@ -1,3 +1,4 @@
 package org.xanho.cube.akka
 
-abstract class ActorMessage
+trait ActorMessage
+trait ActorEvent

@@ -2,7 +2,8 @@ package org.xanho.web.frontend.styles
 
 import org.xanho.web.frontend.styles.utils.StyleUtils
 import org.xanho.web.frontend.styles.constants.StyleConstants
-import org.xanho.web.frontend.styles.fonts.{FontStyle, FontWeight, DefaultFonts}
+import org.xanho.web.frontend.styles.constants.StyleConstants.Colors
+import org.xanho.web.frontend.styles.fonts.{DefaultFonts, FontStyle, FontWeight}
 import org.xanho.web.frontend.styles.utils.MediaQueries
 
 import scala.language.postfixOps
@@ -79,7 +80,9 @@ object GlobalStyles extends StyleSheet.Inline {
     unsafeRoot("body")(
       position.relative,
       height(100 %%),
-      fontSize(1.6 rem)
+      fontSize(1.6 rem),
+      backgroundColor(c"#cdeb8e"),
+      background := "linear-gradient(45deg, #cdeb8e 0%,#a5c956 100%)"
     ),
 
     unsafeRoot("p")(
@@ -160,10 +163,10 @@ object GlobalStyles extends StyleSheet.Inline {
       margin(4 rem, `0`, 5 rem, 4.5 rem),
       padding(1.5 rem, 3 rem),
       fontSize(3.2 rem),
-      color(StyleConstants.Colors.Grey),
+      color(c"#999999"),
 
       &.before(
-        StyleUtils.border(StyleConstants.Colors.Red,.3 rem),
+        StyleUtils.border(Colors.c5,.3 rem),
         content := "\" \"",
         position.absolute,
         top(`0`),
@@ -289,6 +292,7 @@ object GlobalStyles extends StyleSheet.Inline {
     width(StyleConstants.Sizes.BodyWidth px),
     height(100 %%),
     margin(0 px, auto),
+    color(Colors.c1),
 
     MediaQueries.tabletLandscape(
       style(
@@ -326,13 +330,5 @@ object GlobalStyles extends StyleSheet.Inline {
 
   val noMargin = style(
     margin(`0`).important
-  )
-
-  val red = style(
-    color(StyleConstants.Colors.Red).important
-  )
-
-  val grey = style(
-    color(StyleConstants.Colors.Grey).important
   )
 }

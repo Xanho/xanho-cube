@@ -108,7 +108,7 @@ class CubeActor(cubeId: String) extends Actor with ActorLogging {
         case FirebaseDatabase =>
           Some(
             FirebaseDatabase.watchCollection("cubes", cubeId, "messages")(
-              (v: JsValue) => self ! v.as[Message]
+              (_: String, v: JsValue) => self ! v.as[Message]
             )
           )
         case _ =>

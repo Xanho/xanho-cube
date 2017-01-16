@@ -4,7 +4,6 @@ import java.util.UUID
 
 import org.scalajs.dom.raw.WebSocket
 import org.scalajs.dom.{ErrorEvent, Event, MessageEvent}
-import org.xanho.web.frontend.config.Config
 import org.xanho.web.rpc.Protocol.Heartbeat
 import org.xanho.web.rpc.{FailedRPCResultException, Messages, Protocol}
 import org.xanho.web.shared.models.FirebaseUser
@@ -16,9 +15,11 @@ import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
 
 object RPC {
+//  import org.xanho.web.frontend.config.Config
 
   private val wsAddress =
-    Config.getString("xanho.ws.address")
+    "ws://localhost:8000/ws"
+//    Config.getString("xanho.ws.address")
 
   import org.xanho.web.frontend.Context.executionContext
 
@@ -81,6 +82,9 @@ object RPC {
         println(s"Received failure $failedResult")
         rpcs.get(failedResult.id)
           .foreach(_ failure FailedRPCResultException(failedResult))
+      case m =>
+        println(s"Unrecognized message received: $m")
+
     }
 
   private def sendToServer(message: Messages.RPCMessage): Option[Promise[Messages.RPCResult]] = {
@@ -110,6 +114,9 @@ object RPC {
           None
         case r: Messages.FailedRPCResult =>
           outboundQueue.enqueue(write(r))
+          None
+        case m =>
+          println(s"Attempted to send unrecognized message: $m")
           None
       }
     flushQueue()

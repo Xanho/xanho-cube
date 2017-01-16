@@ -26,19 +26,16 @@ object StyleConstants extends StyleSheet.Inline{
     * COLORS
     */
   object Colors {
-    val Red = c"#e30613"
-
-    val RedLight = c"#ff2727"
-
-    val GreyExtra = c"#ebebeb"
-
-    val GreySemi = c"#cfcfd6"
-
-    val Grey = c"#777785"
-
-    val Yellow = c"#ffd600"
-
-    val Cyan = c"#eef4f7"
+    val c1 =
+      c"#354242"
+    val c2 =
+      c"#ACEBAE"
+    val c3 =
+      c"#FFFF9D"
+    val c4 =
+      c"#C9DE55"
+    val c5 =
+      c"#7D9100"
   }
 
   /**

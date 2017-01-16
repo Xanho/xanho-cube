@@ -62,7 +62,9 @@ class FirebaseDatabaseSpec extends WordSpec {
         mutable.Buffer.empty[String]
 
       val id =
-        FirebaseDatabase.watchCollection(testBucketName, "item", "bar")((v: JsValue) => newItems += v.as[String])
+        FirebaseDatabase.watchCollection(testBucketName, "item", "bar")(
+          (_: String, v: JsValue) => newItems += v.as[String]
+        )
 
       Thread.sleep(3000)
 

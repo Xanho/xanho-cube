@@ -57,7 +57,7 @@ object StyleUtils extends StyleSheet.Inline {
     transitionTimingFunction.easeInOut
   )
 
-  def border(bColor: ValueT[ValueT.Color] = StyleConstants.Colors.GreyExtra, bWidth: Length[Double] = 1.0 px, bStyle: AV = borderStyle.solid): StyleA = style(
+  def border(bColor: ValueT[ValueT.Color] = c"#bbbbbb", bWidth: Length[Double] = 1.0 px, bStyle: AV = borderStyle.solid): StyleA = style(
     borderWidth(bWidth),
     bStyle,
     borderColor(bColor)

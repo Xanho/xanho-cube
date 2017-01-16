@@ -88,7 +88,7 @@ object DocumentStorage {
 object FirebaseDatabase extends DocumentStorage {
 
   import org.xanho.utility.Config.config
-
+  import com.google.firebase.database.{FirebaseDatabase => GFirebaseDatabase}
   val baseUrl: String =
     config.getString("firebase.url")
       .ensuring(_ startsWith "https://")
@@ -115,8 +115,11 @@ object FirebaseDatabase extends DocumentStorage {
         .build()
     )
 
-  private val database =
-    com.google.firebase.database.FirebaseDatabase.getInstance(app)
+  /**
+    * An Admin Database reference to the Firebase Database
+    */
+  val database: GFirebaseDatabase =
+    GFirebaseDatabase.getInstance(app)
 
   def get(bucket: String, key: String*)(implicit ec: ExecutionContext): Future[Option[JsValue]] = {
     val p = Promise[Option[JsValue]]()
@@ -229,7 +232,7 @@ object FirebaseDatabase extends DocumentStorage {
     * @param f      A function which handles a newly added JsValue
     * @return An identifier for the watcher, to be used when removing the watcher
     */
-  def watchCollection(bucket: String, key: String*)(f: JsValue => _): String = {
+  def watchCollection(bucket: String, key: String*)(f: (String, JsValue) => _): String = {
     val id =
       UUID.randomUUID().toString
     val listener =
@@ -245,7 +248,7 @@ object FirebaseDatabase extends DocumentStorage {
         def onChildAdded(dataSnapshot: DataSnapshot, s: String): Unit = {
           anyToJson(dataSnapshot.getValue())
             .toOption
-            .foreach(f)
+            .foreach(f(dataSnapshot.getKey, _))
         }
       }
     val keyified =

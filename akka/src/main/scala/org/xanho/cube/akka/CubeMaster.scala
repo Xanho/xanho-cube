@@ -1,23 +1,27 @@
 package org.xanho.cube.akka
 
-import akka.actor.{Actor, ActorContext, ActorLogging, ActorRef, ActorSystem, Props}
+import akka.actor.{ActorContext, ActorLogging, ActorRef, ActorSystem, ExtendedActorSystem, Props}
 import akka.pattern.ask
+import akka.persistence.{PersistentActor, RecoveryCompleted}
 import com.typesafe.scalalogging.LazyLogging
 import org.xanho.utility.FutureUtility.FutureHelper
+import play.api.libs.json._
 
 import scala.collection.mutable
 import scala.concurrent.Future
 import scala.concurrent.duration._
-import scala.util.Success
 
 /**
   * The master cube actor, which maintains references to Cube Cluster actors.  The master also
   * holds a directory of every Cube in the system, mapping them to the corresponding clusters.
   * The master is also responsible for constructing new cubes and assigning them to clusters
   */
-class CubeMaster extends Actor with ActorLogging {
+class CubeMaster extends PersistentActor with ActorLogging {
 
   import context.dispatcher
+
+  override def persistenceId =
+    "cube-master"
 
   /**
     * A set of cluster IDs
@@ -29,56 +33,113 @@ class CubeMaster extends Actor with ActorLogging {
     * A queue of cubes which have been orphaned, and need a new parent
     */
   private val orphanedCubes =
-    mutable.Queue.empty[String]
+    mutable.Set.empty[String]
 
   /**
     * Every 5 seconds, assign any orphaned cubes
     */
-  context.system.scheduler.schedule(5.seconds, 5.seconds)(
-    if (orphanedCubes.nonEmpty)
-      self ! CubeMaster.Messages.AssignOrphans
-  )
+  override def preStart(): Unit =
+    context.system.scheduler.scheduleOnce(5.seconds, self, CubeMaster.Messages.AssignOrphans)
+
+  override def postRestart(reason: Throwable): Unit = {}
 
   /**
     * Receive requests to register clusters, unregister clusters, and create new Cubes
     */
-  def receive: Receive = {
+  val receiveCommand: Receive = {
 
     case CubeMaster.Messages.RegisterCluster(maximumCapacity) =>
-      val s = sender()
+      val s =
+        sender()
       log.info(s"Received register request from $s")
-      clusters.get(s) match {
-        case Some((_, cubeIds)) =>
-          orphanedCubes.enqueue(cubeIds.toSeq: _*)
-        case _ =>
+      if (clusters contains s)
+        orphanAndRemoveCluster(s)
+      persistAndApply(CubeMaster.Events.AddCluster(s, maximumCapacity)) { _ =>
+        s ! Messages.Ok
+        balanceClusters().await
       }
-      clusters.update(s, (maximumCapacity, Set.empty[String]))
-      s ! Messages.Ok
-      balanceClusters()
 
     case CubeMaster.Messages.UnregisterCluster =>
-      val s = sender()
+      val s =
+        sender()
       log.info(s"Received unregister request from $s")
-      orphanedCubes.enqueue(clusters(s)._2.toSeq: _*)
-      clusters.remove(s)
+      orphanAndRemoveCluster(s)
+      s ! Messages.Ok
+      balanceClusters().await
 
     case CubeMaster.Messages.Mount(cubeIds) =>
-      Future.traverse(clusters.keys)(unassignFromCluster(_, cubeIds))
-        .map(_ => orphanedCubes.enqueue(cubeIds.toSeq: _*))
-        .map(_ => self ! CubeMaster.Messages.AssignOrphans)
-        .map(_ => sender() ! Messages.Ok)
-        .await
+      val s =
+        sender()
+      // We only want to mount cubes which aren't already mounted yet
+      val corrected =
+        clusters.foldLeft(cubeIds)(_ -- _._2._2)
+      if (corrected.nonEmpty)
+        persistAndApply(CubeMaster.Events.AddOrphans(corrected))(_ => ())
+
+      s ! Messages.Ok
 
     case CubeMaster.Messages.Dismount(cubeIds) =>
-      Future.traverse(clusters.keys)(unassignFromCluster(_, cubeIds))
-        .map(_ => sender() ! Messages.Ok)
-        .await
+      val s =
+        sender()
+
+      // Construct a mapping from Cluster -> Cubes to Dismount
+      val toDismount =
+        clusters
+          .mapValues(_._2 intersect cubeIds)
+          .filter(_._2.nonEmpty)
+
+      Future.traverse(toDismount)((unassignFromCluster _).tupled).await
+
+      s ! Messages.Ok
 
     case CubeMaster.Messages.AssignOrphans =>
-      log.info(s"Received assign orphans from ${sender()}")
-      assignOrphans().await
+      if (orphanedCubes.nonEmpty)
+        assignOrphans().await
+      context.system.scheduler.scheduleOnce(5.seconds, self, CubeMaster.Messages.AssignOrphans)
+
+    case e: Exception =>
+      throw e
 
   }
+
+  val receiveRecover: Receive = {
+    case e: CubeMaster.CubeMasterEvent =>
+      updateState(e)
+    case RecoveryCompleted =>
+      heal().await(20.seconds)
+    case e =>
+      log.warning(s"Unrecognized journal event: $e")
+  }
+
+  private def updateState(event: CubeMaster.CubeMasterEvent): Unit =
+    event match {
+
+      case CubeMaster.Events.AddCluster(cluster, maximumCapacity) =>
+        clusters.update(cluster, (maximumCapacity, Set.empty))
+      case CubeMaster.Events.RemoveCluster(cluster) =>
+        clusters.remove(cluster)
+
+      case CubeMaster.Events.MountCubes(cluster, cubeIds) =>
+        val (maxCapacity, previousCubeIds) =
+          clusters(cluster)
+        clusters.update(
+          cluster,
+          (maxCapacity, previousCubeIds ++ cubeIds)
+        )
+      case CubeMaster.Events.DismountCubes(cluster, cubeIds) =>
+        val (maxCapacity, previousCubeIds) =
+          clusters(cluster)
+        clusters.update(
+          cluster,
+          (maxCapacity, previousCubeIds -- cubeIds)
+        )
+
+      case CubeMaster.Events.AddOrphans(cubeIds) =>
+        orphanedCubes ++= cubeIds
+      case CubeMaster.Events.RemoveOrphans(cubeIds) =>
+        orphanedCubes --= cubeIds
+
+    }
 
   /**
     * Shut down each of the clusters
@@ -97,35 +158,19 @@ class CubeMaster extends Actor with ActorLogging {
 
     if (clusters contains cluster)
       gracefulStop(cluster, 30.seconds)
-        .map {
-          _ =>
-            orphanedCubes.enqueue(clusters(cluster)._2.toSeq: _*)
-            clusters.remove(cluster)
-        }
+        .map(_ => orphanAndRemoveCluster(cluster))
     else
       Future.successful()
   }
 
-  /**
-    * Tells a Cluster a message
-    *
-    * @param clusterId The ID of the cluster
-    * @param message   The message to send
-    */
-  private def tellCluster(clusterId: String,
-                          message: Any): Unit =
-    clusterRef(clusterId) ! message
-
-  /**
-    * Asks a cluster a question, returning a future with the answer
-    *
-    * @param clusterId The ID of the cluster
-    * @param question  The message to send
-    * @return A Future with the answer
-    */
-  private def askCluster(clusterId: String,
-                         question: Any): Future[Any] =
-    clusterRef(clusterId) ? question
+  private def orphanAndRemoveCluster(cluster: ActorRef): Unit = {
+    clusters(cluster)._2 match {
+      case s if s.nonEmpty =>
+        persistAndApply(CubeMaster.Events.AddOrphans(clusters(cluster)._2))(_ => ())
+      case _ =>
+    }
+    persistAndApply(CubeMaster.Events.RemoveCluster(cluster))(_ => ())
+  }
 
   /**
     * Assigns the given cube IDs to the given cluster.  Updates the cubeClusterAssignments map.
@@ -137,14 +182,15 @@ class CubeMaster extends Actor with ActorLogging {
   private def assignToCluster(cluster: ActorRef,
                               cubeIds: Set[String]): Future[_] = {
     log.info(s"Assigning cubes to cluster $cluster: $cubeIds")
-    val (max, currentCubeIds) =
-      clusters(cluster)
-    cluster.ask(CubeMaster.Messages.Mount(cubeIds))
-      .map(
-        _ =>
-          clusters
-            .update(cluster, (max, currentCubeIds ++ cubeIds))
-      )
+    val toAssign =
+      cubeIds -- clusters(cluster)._2
+    if (toAssign.nonEmpty) {
+      persistAndApply(CubeMaster.Events.MountCubes(cluster, toAssign))(_ => ())
+      cluster
+        .ask(CubeMaster.Messages.Mount(toAssign))
+    } else {
+      Future.successful()
+    }
   }
 
   /**
@@ -157,14 +203,15 @@ class CubeMaster extends Actor with ActorLogging {
   private def unassignFromCluster(cluster: ActorRef,
                                   cubeIds: Set[String]): Future[_] = {
     log.info(s"Unassigning cubes from cluster $cluster: $cubeIds")
-
-    cluster.ask(CubeMaster.Messages.Dismount(cubeIds))
-      .andThen {
-        case Success(_) =>
-          val (max, currentCubeIds) =
-            clusters(cluster)
-          clusters.update(cluster, (max, currentCubeIds -- cubeIds))
-      }
+    val toUnassign =
+      cubeIds intersect clusters(cluster)._2
+    if (toUnassign.nonEmpty) {
+      persistAndApply(CubeMaster.Events.DismountCubes(cluster, toUnassign))(_ => ())
+      cluster
+        .ask(CubeMaster.Messages.Dismount(toUnassign))
+    } else {
+      Future.successful()
+    }
   }
 
   /**
@@ -179,11 +226,20 @@ class CubeMaster extends Actor with ActorLogging {
           .toSeq
           .sortBy(_._2._2.size)
           .map {
-            case (clusterId, (targetSize, cubeIds)) =>
-              clusterId ->
-                (0 until (targetSize - cubeIds.size).max(0).min(orphanedCubes.size))
-                  .map(_ => orphanedCubes.dequeue())
+            case (cluster, (targetSize, cubeIds)) =>
+              cluster ->
+                orphanedCubes
+                  .take(
+                    (targetSize - cubeIds.size)
+                      .max(0)
+                      .min(orphanedCubes.size)
+                  )
                   .toSet
+          }
+          .collect {
+            case (cluster, toUnorphan) if toUnorphan.nonEmpty =>
+              persistAndApply(CubeMaster.Events.RemoveOrphans(toUnorphan))(_ => ())
+              cluster -> toUnorphan
           }
       )((assignToCluster _).tupled)
     else {
@@ -194,25 +250,87 @@ class CubeMaster extends Actor with ActorLogging {
   /**
     * Balances out the clusters, attempting to assign an equal number of cubes to each
     */
-  private def balanceClusters(): Unit = {
-    clusters
-      .foreach {
-        case (cluster, (targetSize, cubeIds)) =>
-          val toOrphan =
-            cubeIds.drop(targetSize)
-          if (toOrphan.nonEmpty)
-            cluster
-              .ask(
-                CubeMaster.Messages.Dismount(toOrphan)
-              ).await
-          orphanedCubes.enqueue(toOrphan.toSeq: _*)
-      }
+  private def balanceClusters(): Future[_] =
+    Future.traverse(
+      clusters
+        .mapValues { case (targetSize, cubeIds) => cubeIds drop targetSize }
+        .collect {
+          case (cluster, toOrphan) if toOrphan.nonEmpty =>
+            persistAndApply(CubeMaster.Events.DismountCubes(cluster, toOrphan))(_ =>
+              persistAndApply(CubeMaster.Events.AddOrphans(toOrphan))(_ => Unit)
+            )
+            cluster -> CubeMaster.Messages.Dismount(toOrphan)
+        }
+    ) {
+      case (cluster, dismountMessage) =>
+        (cluster ? dismountMessage).filter(_ == Messages.Ok)
+    }
 
-    self ! CubeMaster.Messages.AssignOrphans
+  /**
+    * Persist the given event, handle it, and run the given handler asynchronously
+    *
+    * @param event   The event to persist and handle
+    * @param handler The handler to apply afterwards
+    * @tparam A a Cube Master Event
+    */
+  private def persistAndApply[A <: CubeMaster.CubeMasterEvent](event: A)(handler: A => Unit) =
+    persist(event) {
+      e =>
+        updateState(e)
+        handler(e)
+    }
+
+  /**
+    * Performs a self-healing process by pinging each cluster and gathering its current active cubes.  Any mis-alignments
+    * from what is expected will be handled.  If the cluster does not respond, generate new events which remove the
+    * cluster and its cubes.
+    *
+    * @return a Future
+    */
+  private def heal(): Future[_] = {
+    Future.traverse(clusters) {
+      case (cluster, (_, cubeIds)) =>
+        cluster
+          // Request its status
+          .ask(Messages.Status)(5.seconds)
+          .collect {
+            // We only care about Status responses
+            case CubeCluster.Messages.Status(actualCubeIds) =>
+              (cubeIds -- actualCubeIds, actualCubeIds -- cubeIds)
+          }
+          .flatMap {
+            // (Cubes missing from Cluster, Cubes on cluster which were not expected)
+            case (missing, extras) =>
+              val missingFuture =
+                if (missing.nonEmpty)
+                  cluster
+                    .ask(CubeMaster.Messages.Mount(missing))
+                    .filter(_ == Messages.Ok)
+                else
+                  Future.successful()
+              val extraFuture =
+                if (extras.nonEmpty)
+                  cluster
+                    .ask(CubeMaster.Messages.Dismount(extras))
+                    .filter(_ == Messages.Ok)
+                else
+                  Future.successful()
+              missingFuture.zip(extraFuture)
+          }
+          .recoverWith {
+            // If the cluster could not be found, or if something error'd, we'll remove it and orphan its cubes
+            case _ =>
+              val expectedCubes =
+                clusters(cluster)._2
+              if (expectedCubes.nonEmpty) {
+                persistAndApply(CubeMaster.Events.DismountCubes(cluster, expectedCubes))(_ => ())
+                persistAndApply(CubeMaster.Events.AddOrphans(expectedCubes))(_ => ())
+              }
+              persistAndApply(CubeMaster.Events.RemoveCluster(cluster))(_ => ())
+              Future.successful()
+          }
+    }
   }
-
-  private def clusterRef(clusterId: String) =
-    context.actorSelection(clusterPath(clusterId)).resolveOne().await
 }
 
 object CubeMaster extends LazyLogging {
@@ -228,17 +346,88 @@ object CubeMaster extends LazyLogging {
 
   object Messages {
 
-    case class RegisterCluster(maximumCapacity: Int) extends ActorMessage
+    case class RegisterCluster(maximumCapacity: Int) extends ActorMessage with ActorEvent
 
-    case object UnregisterCluster extends ActorMessage
+    case object UnregisterCluster extends ActorMessage with ActorEvent
 
-    case class Mount(cubeIds: Set[String]) extends ActorMessage
+    case class Mount(cubeIds: Set[String]) extends ActorMessage with ActorEvent
 
-    case class Dismount(cubeIds: Set[String]) extends ActorMessage
+    case class Dismount(cubeIds: Set[String]) extends ActorMessage with ActorEvent
 
     case object UnregisterAll extends ActorMessage
 
     case object AssignOrphans extends ActorMessage
+
+  }
+
+  sealed abstract class CubeMasterEvent extends ActorEvent
+
+  import akka.serialization._
+
+  implicit def formatActorRef(implicit system: ExtendedActorSystem): Format[ActorRef] =
+    Format[ActorRef](
+      Reads[ActorRef] {
+        case JsString(strRef) =>
+          JsSuccess(system.provider.resolveActorRef(strRef))
+      },
+      Writes[ActorRef](ref => JsString(Serialization.serializedActorPath(ref)))
+    )
+
+  implicit def format(implicit system: ExtendedActorSystem): Format[CubeMasterEvent] =
+    Format[CubeMasterEvent](
+      Reads[CubeMasterEvent](v =>
+        JsSuccess(
+          (v \ "type").as[String] match {
+            case "addCluster" =>
+              v.as[Events.AddCluster](Json.reads[Events.AddCluster])
+            case "removeCluster" =>
+              v.as[Events.RemoveCluster](Json.reads[Events.RemoveCluster])
+            case "mountCubes" =>
+              v.as[Events.MountCubes](Json.reads[Events.MountCubes])
+            case "dismountCubes" =>
+              v.as[Events.DismountCubes](Json.reads[Events.DismountCubes])
+            case "addOrphans" =>
+              v.as[Events.AddOrphans](Json.reads[Events.AddOrphans])
+            case "removeOrphans" =>
+              v.as[Events.RemoveOrphans](Json.reads[Events.RemoveOrphans])
+          }
+        )
+      ),
+      Writes[CubeMasterEvent] {
+        case e: Events.AddCluster =>
+          Json.toJson(e)(Json.writes[Events.AddCluster]).as[JsObject] +
+            ("type" -> JsString("addCluster"))
+        case e: Events.RemoveCluster =>
+          Json.toJson(e)(Json.writes[Events.RemoveCluster]).as[JsObject] +
+            ("type" -> JsString("removeCluster"))
+        case e: Events.MountCubes =>
+          Json.toJson(e)(Json.writes[Events.MountCubes]).as[JsObject] +
+            ("type" -> JsString("mountCubes"))
+        case e: Events.DismountCubes =>
+          Json.toJson(e)(Json.writes[Events.DismountCubes]).as[JsObject] +
+            ("type" -> JsString("dismountCubes"))
+        case e: Events.AddOrphans =>
+          Json.toJson(e)(Json.writes[Events.AddOrphans]).as[JsObject] +
+            ("type" -> JsString("addOrphans"))
+        case e: Events.RemoveOrphans =>
+          Json.toJson(e)(Json.writes[Events.RemoveOrphans]).as[JsObject] +
+            ("type" -> JsString("removeOrphans"))
+      }
+    )
+
+  object Events {
+
+    case class AddCluster(cluster: ActorRef, maximumCapacity: Int) extends CubeMasterEvent
+
+    case class RemoveCluster(cluster: ActorRef) extends CubeMasterEvent
+
+    case class MountCubes(cluster: ActorRef, cubeIds: Set[String]) extends CubeMasterEvent
+
+    case class DismountCubes(cluster: ActorRef, cubeIds: Set[String]) extends CubeMasterEvent
+
+    case class AddOrphans(cubeIds: Set[String]) extends CubeMasterEvent
+
+    case class RemoveOrphans(cubeIds: Set[String]) extends CubeMasterEvent
 
   }
 

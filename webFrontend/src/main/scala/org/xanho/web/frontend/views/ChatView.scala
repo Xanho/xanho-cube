@@ -6,68 +6,91 @@ import io.udash.{FinalView, Presenter, ViewPresenter}
 import org.scalajs.dom.Event
 import org.scalajs.dom.html.Div
 import org.xanho.web.frontend.RoutingState
+import org.xanho.web.frontend.styles.ChatStyles
 import org.xanho.web.frontend.utility.{Auth, Database}
 import org.xanho.web.shared.models.{Message, User}
 import upickle.Js
 
+import scala.scalajs.js
 import scala.util.Success
-import scalacss.internal.LengthUnit.px
 import scalatags.JsDom.TypedTag
 
 class ChatView(model: ModelProperty[ChatViewModel],
                presenter: ChatPresenter) extends FinalView {
 
   import io.udash._
+  import io.udash.wrappers.jquery._
 
+  import scala.language.postfixOps
+  import scalacss.ScalatagsCss._
   import scalatags.JsDom.all._
 
-  private def messages =
-    div(
-      ul(
-        repeat(
-          model.subSeq(_.messages)
-        )(message =>
-          li(
-            ul(
-              li(
-                b("Source ID: "),
-                bind(message.asModel.subProp(_.sourceId))
-              ),
-              li(
-                b("Destination ID: "),
-                bind(message.asModel.subProp(_.destinationId))
-              ),
-              li(
-                b("Message Text: "),
-                bind(message.asModel.subProp(_.text))
-              ),
-              li(
-                b("Timestamp: "),
-                bind(message.asModel.subProp(_.timestamp))
-              )
-            ),
-            br
-          ).render
-        )
+  model.subSeq(_.messages).listen(_ =>
+    jQ("#messageList")
+      .stop()
+      .animate(
+        Map(
+          "scrollTop" -> jQ("#messageList").get(0).get.scrollHeight
+        ),
+        800
       )
+  )
+
+  private def messageBox = {
+    val now =
+      System.currentTimeMillis()
+    import scala.concurrent.duration._
+    def constructMessage(message: CastableProperty[Message]) = {
+      div(
+        ChatStyles.message,
+        message.reactiveApply {
+          (elem, message) =>
+            if (message.sourceId == model.subProp(_.user).get.get.uid)
+              ChatStyles.messageRight.applyTo(elem)
+            else
+              ChatStyles.messageLeft.applyTo(elem)
+        }
+      )(
+        div(ChatStyles.messageText)(message.get.text),
+        div(ChatStyles.messageTimestamp) {
+          val jsDate =
+            new js.Date(message.get.timestamp)
+          (
+            if (message.get.timestamp < now - 1.days.length)
+              jsDate.toDateString() + " "
+            else
+              ""
+            ) +
+            jsDate.toLocaleTimeString()
+        }
+      )
+    }
+
+    div(
+      id := "messageList",
+      ChatStyles.messagesBox
+    )(
+      repeat(model.subSeq(_.messages))(constructMessage(_).render)
+    )
+  }
+
+
+  private def userInputContainer =
+    div(ChatStyles.userInputContainer)(
+      button(
+        ChatStyles.submitButton,
+        onclick :+= ((_: Event) => presenter.sendMessage())
+      )("Send"),
+      TextInput.debounced(
+        model.subProp(_.currentUserText),
+        ChatStyles.textInput
+      )()
     )
 
   def getTemplate: TypedTag[Div] =
-    div(
-      p(
-        "Hello ",
-        span(
-          bind(
-            model.subProp(_.user)
-              .transform(_.fold("Anonymous")(_.email))
-          )
-        )
-      ),
-      messages.render,
-      TextInput.debounced(model.subProp(_.currentUserText))(),
-      button(
-        onclick :+= ((_: Event) => presenter.sendMessage())
-      )("Send")
+    div(ChatStyles.chatViewContainer)(
+      messageBox.render,
+      userInputContainer.render
     )
 
 }
@@ -117,10 +140,12 @@ class ChatPresenter(model: ModelProperty[ChatViewModel]) extends Presenter[ChatS
             cubeId,
             System.currentTimeMillis()
           )
+        model.subProp(_.currentUserText).set("")
         import upickle.default.writeJs
         val json =
           writeJs[Message](message)(Message.writer)
         Database.append("cubes", cubeId, "messages")(json)
+      case _ =>
     }
 
 }

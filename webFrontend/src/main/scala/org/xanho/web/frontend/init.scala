@@ -51,7 +51,10 @@ object Init extends JSApp with StrictLogging {
             Config.getString("firebase.messageSenderId")
           )
         )
+        logger.info("Firebase initialized")
 
+        logger.info("Initializing context")
+        import Context._
         Context
 
         applicationInstance.run(appRoot.get)
