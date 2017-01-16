@@ -5,8 +5,8 @@ import io.udash.{Application, StrictLogging}
 import org.scalajs.dom._
 import org.xanho.web.frontend.js.{FirebaseConfig, ImportedJS}
 import org.xanho.web.frontend.rpc.RPC
-import org.xanho.web.frontend.styles.partials.{FooterStyles, HeaderStyles}
-import org.xanho.web.frontend.styles.{GlobalStyles, IndexStyles}
+import org.xanho.web.frontend.styles.partials.HeaderStyles
+import org.xanho.web.frontend.styles.{ChatStyles, GlobalStyles, IndexStyles}
 import org.xanho.web.frontend.views.IndexState
 
 import scala.concurrent.ExecutionContextExecutor
@@ -32,11 +32,8 @@ object Context {
 
 object Init extends JSApp with StrictLogging {
 
-  import Context._
-
   @JSExport
   override def main(): Unit = {
-    import org.xanho.web.frontend.config.Config
     jQ(document).ready((_: Element) => {
       val appRoot = jQ("#application").get(0)
       if (appRoot.isEmpty) {
@@ -44,16 +41,13 @@ object Init extends JSApp with StrictLogging {
       } else {
         ImportedJS.firebase.initializeApp(
           new FirebaseConfig(
-            Config.getString("firebase.apikKey"),
-            Config.getString("firebase.authDomain"),
-            Config.getString("firebase.databaseURL"),
-            Config.getString("firebase.storageBucket"),
-            Config.getString("firebase.messageSenderId")
+            "",
+            "",
+            "",
+            "",
+            ""
           )
         )
-        logger.info("Firebase initialized")
-
-        logger.info("Initializing context")
         import Context._
         Context
 
@@ -64,7 +58,7 @@ object Init extends JSApp with StrictLogging {
         import scalatags.JsDom._
         jQ(GlobalStyles.render[TypedTag[org.scalajs.dom.raw.HTMLStyleElement]].render).insertBefore(appRoot.get)
         jQ(IndexStyles.render[TypedTag[org.scalajs.dom.raw.HTMLStyleElement]].render).insertBefore(appRoot.get)
-        jQ(FooterStyles.render[TypedTag[org.scalajs.dom.raw.HTMLStyleElement]].render).insertBefore(appRoot.get)
+        jQ(ChatStyles.render[TypedTag[org.scalajs.dom.raw.HTMLStyleElement]].render).insertBefore(appRoot.get)
         jQ(HeaderStyles.render[TypedTag[org.scalajs.dom.raw.HTMLStyleElement]].render).insertBefore(appRoot.get)
       }
     })
