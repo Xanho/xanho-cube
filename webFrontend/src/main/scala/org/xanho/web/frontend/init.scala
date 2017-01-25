@@ -41,11 +41,11 @@ object Init extends JSApp with StrictLogging {
       } else {
         ImportedJS.firebase.initializeApp(
           new FirebaseConfig(
-            "",
-            "",
-            "",
-            "",
-            ""
+            "AIzaSyDZsFvxRELTzcvjkCa_JHNsVu3bJg5B6e8",
+            "xanho-151422.firebaseapp.com",
+            "https://xanho-151422.firebaseio.com",
+            "xanho-151422.appspot.com",
+            "943127112483"
           )
         )
         import Context._

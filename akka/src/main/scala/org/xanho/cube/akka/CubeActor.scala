@@ -2,9 +2,10 @@ package org.xanho.cube.akka
 
 import akka.actor.{Actor, ActorLogging, Props}
 import com.seancheatham.graph.adapters.memory.MutableGraph
+import com.seancheatham.storage.firebase.{ChildAddedHandler, FirebaseDatabase}
 import org.xanho.cube.core.{Cube, Message}
 import org.xanho.utility.FutureUtility.FutureHelper
-import org.xanho.utility.data.{Buckets, DocumentStorage, FirebaseDatabase}
+import org.xanho.utility.data.Buckets
 import play.api.libs.json.{JsObject, JsValue, Json}
 
 import scala.concurrent.Future
@@ -28,13 +29,17 @@ class CubeActor(cubeId: String) extends Actor with ActorLogging {
     * from storage, which may take a while.  This step will block until complete.
     */
   private var cube: Cube =
-    DocumentStorage.default
+    FirebaseDatabase()
       .get(Buckets.CUBES, cubeId, "graph")
-      .map(_.fold(new MutableGraph())(_.as[MutableGraph](MutableGraph.read())))
+      .map(_.as[MutableGraph](MutableGraph.read()))
+      .recover {
+        case _: NoSuchElementException =>
+          new MutableGraph()
+      }
       .zip(
-        DocumentStorage.default
+        FirebaseDatabase()
           .get(Buckets.CUBES, cubeId, "data")
-          .map(_.get.as[Map[String, JsValue]])
+          .map(_.as[Map[String, JsValue]])
       )
       .map {
         case (graph, data) =>
@@ -104,39 +109,30 @@ class CubeActor(cubeId: String) extends Actor with ActorLogging {
     */
   private def attachMessageListener() =
     messageListenerId =
-      DocumentStorage.default match {
-        case FirebaseDatabase =>
-          Some(
-            FirebaseDatabase.watchCollection("cubes", cubeId, "messages")(
-              (_: String, v: JsValue) => self ! v.as[Message]
-            )
-          )
-        case _ =>
-          None
-      }
+      Some(
+        FirebaseDatabase().watchCollection("cubes", cubeId, "messages")(
+          ChildAddedHandler((_: String, v: JsValue) => self ! v.as[Message])
+        )()
+      )
 
   /**
     * Detach the message listener
     */
   private def detachMessageListener() =
     messageListenerId
-      .foreach(id =>
-        DocumentStorage.default match {
-          case FirebaseDatabase =>
-            FirebaseDatabase.unwatchCollection(id)
-            messageListenerId = None
-          case _ =>
-        }
-      )
+      .foreach { id =>
+        FirebaseDatabase().unwatchCollection(id)
+        messageListenerId = None
+      }
 
   /**
     * Save the cube's graph and data to document storage
     */
   private def saveCube(): Future[_] =
-    DocumentStorage.default
+    FirebaseDatabase()
       .write(Buckets.CUBES, cubeId, "graph")(Json.toJson(cube.graph))
       .zip(
-        DocumentStorage.default
+        FirebaseDatabase()
           .write(Buckets.CUBES, cubeId, "data")(JsObject(cube.data))
       )
 
@@ -152,7 +148,7 @@ class CubeActor(cubeId: String) extends Actor with ActorLogging {
                           text: String,
                           retries: Int = 3): Future[_] = {
     val f =
-      DocumentStorage.default.append(Buckets.CUBES, cubeId, "messages")(
+      FirebaseDatabase().append(Buckets.CUBES, cubeId, "messages")(
         Json.toJson(Message(text, cubeId, destination, System.currentTimeMillis()))
       )
     f onFailure {

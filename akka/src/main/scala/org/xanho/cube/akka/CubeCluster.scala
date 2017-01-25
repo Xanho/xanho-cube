@@ -25,19 +25,13 @@ class CubeCluster(id: String,
   import context.dispatcher
 
   /**
-    * A reference to the Cube Master
-    */
-  private val cubeMaster: ActorRef =
-    Await.result(context.actorSelection(masterPath).resolveOne(), defaultTimeout)
-
-  /**
     * A mapping from actor ID to Cube Actor reference
     */
   private val cubeActors =
     mutable.Map.empty[String, ActorRef]
 
   context.system.scheduler.scheduleOnce(0.seconds)(
-    cubeMaster ! CubeMaster.Messages.RegisterCluster(maximumCapacity)
+    CubeMaster.ref ! CubeMaster.Messages.RegisterCluster(maximumCapacity)
   )
 
   def receive: Receive = {

@@ -56,7 +56,9 @@ lazy val cubeAkka =
       name := "cube-akka",
       libraryDependencies ++=
         Dependencies.akka ++
-          Dependencies.akkaHttp
+          Dependencies.akkaHttp ++
+          Dependencies.storage ++
+          Dependencies.journal
     )
     .dependsOn(cubeCore, utility, webSharedJVM)
 

@@ -78,6 +78,16 @@ object Dependencies {
       "com.google.firebase" % "firebase-admin" % "4.0.3"
     )
 
+  val storage =
+    Seq(
+      "com.seancheatham" %% "storage-firebase" % "0.0.1"
+    )
+
+  val journal =
+    Seq(
+      "com.seancheatham" %% "firebase-persistence" % "0.0.2"
+    )
+
   val crossDeps =
     Def.setting(
       Seq[ModuleID](

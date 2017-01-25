@@ -1,8 +1,10 @@
 package org.xanho.cube.akka
 
-import akka.actor.{ActorContext, ActorLogging, ActorRef, ActorSystem, ExtendedActorSystem, Props}
+import java.util.concurrent.atomic.AtomicLong
+
+import akka.actor.{ActorContext, ActorLogging, ActorRef, ActorSelection, ActorSystem, ExtendedActorSystem, Props}
 import akka.pattern.ask
-import akka.persistence.{PersistentActor, RecoveryCompleted}
+import akka.persistence.{PersistentActor, RecoveryCompleted, SnapshotOffer}
 import com.typesafe.scalalogging.LazyLogging
 import org.xanho.utility.FutureUtility.FutureHelper
 import play.api.libs.json._
@@ -22,6 +24,24 @@ class CubeMaster extends PersistentActor with ActorLogging {
 
   override def persistenceId =
     "cube-master"
+
+  /**
+    * A count of events which have been processed by this actor
+    */
+  private val eventCount =
+    new AtomicLong()
+
+  private implicit val config =
+    context.system.settings.config
+
+  /**
+    * The number events to wait between saving snapshots
+    */
+  private val saveSnapshotFrequency: Int =
+    if(config.hasPath("persistence.frequency"))
+      config.getInt("persistence.frequency")
+    else
+      8
 
   /**
     * A set of cluster IDs
@@ -102,16 +122,27 @@ class CubeMaster extends PersistentActor with ActorLogging {
 
   }
 
+  private var isRecovering =
+    true
+
   val receiveRecover: Receive = {
+    case SnapshotOffer(_, v) =>
+      val (snapshotClusters, snapshotOrphanedCubes) =
+        v
+      clusters.clear()
+      snapshotClusters.asInstanceOf[mutable.Map[ActorRef, (Int, Set[String])]].foreach(clusters += _)
+      orphanedCubes.clear()
+      orphanedCubes ++= snapshotOrphanedCubes.asInstanceOf[mutable.Set[String]]
     case e: CubeMaster.CubeMasterEvent =>
       updateState(e)
     case RecoveryCompleted =>
+      isRecovering = false
       heal().await(20.seconds)
     case e =>
       log.warning(s"Unrecognized journal event: $e")
   }
 
-  private def updateState(event: CubeMaster.CubeMasterEvent): Unit =
+  private def updateState(event: CubeMaster.CubeMasterEvent): Unit = {
     event match {
 
       case CubeMaster.Events.AddCluster(cluster, maximumCapacity) =>
@@ -140,6 +171,14 @@ class CubeMaster extends PersistentActor with ActorLogging {
         orphanedCubes --= cubeIds
 
     }
+    val newEventCount =
+      eventCount.incrementAndGet()
+    if(
+      !isRecovering &&
+        newEventCount % saveSnapshotFrequency == 0
+    )
+      saveSnapshot((clusters, orphanedCubes))
+  }
 
   /**
     * Shut down each of the clusters
@@ -341,8 +380,8 @@ object CubeMaster extends LazyLogging {
     system.actorOf(Props[CubeMaster], "cube-master")
   }
 
-  def ref(implicit context: ActorContext): Future[ActorRef] =
-    context.actorSelection(masterPath).resolveOne()
+  def ref(implicit context: ActorContext): ActorSelection =
+    context.actorSelection(masterPath)
 
   object Messages {
 
@@ -366,10 +405,7 @@ object CubeMaster extends LazyLogging {
 
   implicit def formatActorRef(implicit system: ExtendedActorSystem): Format[ActorRef] =
     Format[ActorRef](
-      Reads[ActorRef] {
-        case JsString(strRef) =>
-          JsSuccess(system.provider.resolveActorRef(strRef))
-      },
+      Reads[ActorRef](v => JsSuccess(system.provider.resolveActorRef(v.as[String]))),
       Writes[ActorRef](ref => JsString(Serialization.serializedActorPath(ref)))
     )
 

@@ -13,13 +13,14 @@ import akka.http.scaladsl.server.Route
 import akka.http.scaladsl.server.RouteResult.route2HandlerFlow
 import akka.pattern.ask
 import akka.routing.RoundRobinPool
-import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.stream.scaladsl.{Flow, Sink, Source}
+import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.util.ByteString
 import com.seancheatham.graph.adapters.memory.MutableGraph
+import com.seancheatham.storage.firebase.FirebaseDatabase
 import org.xanho.cube.akka.rpc.WebSocketActor
 import org.xanho.utility.FutureUtility.FutureHelper
-import org.xanho.utility.data.{Buckets, DocumentStorage}
+import org.xanho.utility.data.Buckets
 import org.xanho.web.rpc.Messages.RPCMessage
 import play.api.libs.json.{JsString, JsValue, Json}
 
@@ -39,12 +40,6 @@ class ApiActor(id: String,
                port: Int) extends Actor with ActorLogging {
 
   import context.dispatcher
-
-  /**
-    * A reference to the Cube Master
-    */
-  private val cubeMaster: ActorRef =
-    CubeMaster.ref.await
 
   implicit val materializer =
     ActorMaterializer()
@@ -112,18 +107,16 @@ class ApiActor(id: String,
       .await(Duration.Inf)
 
   private def createUser(userId: String): Future[String] = {
-    DocumentStorage()
+    FirebaseDatabase.default
       .get("users", userId)
-      .flatMap {
-        case Some(_) =>
-          Future.successful(userId)
-        case _ =>
+      .recoverWith {
+        case _: NoSuchElementException =>
           createCube(userId)
             .flatMap(cubeId =>
-              DocumentStorage().write("users", userId, "cubeId")(JsString(cubeId))
+              FirebaseDatabase.default.write("users", userId, "cubeId")(JsString(cubeId))
             )
-            .map(_ => userId)
       }
+      .map(_ => userId)
   }
 
   /**
@@ -134,7 +127,7 @@ class ApiActor(id: String,
   private def createCube(ownerId: String): Future[String] = {
     val id =
       UUID.randomUUID().toString
-    DocumentStorage.default
+    FirebaseDatabase.default
       .write(Buckets.CUBES, id)(
         Json.obj(
           "messages" -> Seq.empty[JsValue],
@@ -150,12 +143,12 @@ class ApiActor(id: String,
   }
 
   private def mountCube(cubeId: String): Future[_] =
-    cubeMaster
+    CubeMaster.ref
       .ask(CubeMaster.Messages.Mount(Set(cubeId)))
       .filter(_ == Messages.Ok)
 
   private def dismountCube(cubeId: String): Future[_] =
-    cubeMaster
+    CubeMaster.ref
       .ask(CubeMaster.Messages.Dismount(Set(cubeId)))
       .filter(_ == Messages.Ok)
 
