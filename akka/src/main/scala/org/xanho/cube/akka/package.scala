@@ -1,6 +1,7 @@
 package org.xanho.cube
 import scala.concurrent.duration._
 import org.xanho.utility.Config.config
+import _root_.akka.actor.ActorSystem
 package object akka {
 
   object Messages {
@@ -30,6 +31,9 @@ package object akka {
   val apiPrefix: String =
     config.getString("xanho.akka.api.prefix")
 
+  val webPrefix: String =
+    config.getString("xanho.akka.web.prefix")
+
   val actorHostname: String =
     config.getString("akka.remote.netty.tcp.hostname")
 
@@ -43,6 +47,20 @@ package object akka {
       config.getInt("xanho.akka.cube_master.port")
     )
 
+  val apiPath: String =
+    toRemotePath(
+      s"/user/api",
+      config.getString("xanho.akka.api.hostname"),
+      config.getInt("xanho.akka.api.port")
+    )
+
+  val webPath: String =
+    toRemotePath(
+      s"/user/web",
+      config.getString("xanho.akka.api.hostname"),
+      config.getInt("xanho.akka.api.port")
+    )
+
   def clusterPath(name: String): String =
     toRemotePath(
       s"/user/$cubeClusterPrefix$name",
@@ -50,16 +68,12 @@ package object akka {
       config.getInt("xanho.akka.cube_cluster.port")
     )
 
-  def apiPath(id: String): String =
-    toRemotePath(
-      s"/user/$apiPrefix$id",
-      config.getString("xanho.akka.api.hostname"),
-      config.getInt("xanho.akka.api.port")
-    )
-
   def toRemotePath(base: String,
                    host: String,
                    port: Int) =
     s"akka.tcp://$actorSystemName@$host:$port$base"
+
+  lazy val defaultSystem =
+    ActorSystem("xanho")
 
 }

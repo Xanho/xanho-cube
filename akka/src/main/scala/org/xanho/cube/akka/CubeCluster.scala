@@ -25,36 +25,22 @@ class CubeCluster(id: String,
   import context.dispatcher
 
   /**
-    * A reference to the Cube Master
-    */
-  private val cubeMaster: ActorRef =
-    Await.result(context.actorSelection(masterPath).resolveOne(), defaultTimeout)
-
-  /**
     * A mapping from actor ID to Cube Actor reference
     */
   private val cubeActors =
     mutable.Map.empty[String, ActorRef]
 
-  /**
-    * Register this cluster right away, erroring out if it can't
-    */
-  Await.result(
-    cubeMaster ? CubeMaster.Messages.RegisterCluster(id, maximumCapacity),
-    defaultTimeout
-  ) match {
-    case Messages.Ok =>
-    case _ =>
-      throw new IllegalStateException("Unable to register with master")
-  }
+  context.system.scheduler.scheduleOnce(0.seconds)(
+    CubeMaster.ref ! CubeMaster.Messages.RegisterCluster(maximumCapacity)
+  )
 
   def receive: Receive = {
-    case CubeCluster.Messages.Register(cubeIds) =>
+    case CubeMaster.Messages.Mount(cubeIds) =>
       log.info(s"Received cube registration request for cube IDs: $cubeIds")
       cubeIds.foreach(loadCube)
       sender() ! Messages.Ok
 
-    case CubeCluster.Messages.Unregister(cubeIds) =>
+    case CubeMaster.Messages.Dismount(cubeIds) =>
       log.info(s"Received cube unregister request for cube IDs: $cubeIds")
       Await.ready(
         Future.traverse(cubeIds)(unloadCube)
@@ -67,7 +53,7 @@ class CubeCluster(id: String,
         Duration.Inf
       )
 
-    case CubeCluster.Messages.UnregisterAll =>
+    case CubeMaster.Messages.UnregisterAll =>
       log.info("Received cube unregister all request")
       Await.ready(
         Future.traverse(cubeActors.keysIterator)(unloadCube)
@@ -127,23 +113,15 @@ object CubeCluster extends LazyLogging {
     Props(new CubeCluster(id, maximumCapacity))
 
   def initialize(id: String = UUID.randomUUID().toString,
-                 maximumCapacity: Int = 20): Unit = {
+                 maximumCapacity: Int = 20)
+                (implicit system: ActorSystem = defaultSystem): Unit = {
     logger.info(s"Starting a Cube Cluster actor with ID $id")
-    val system =
-      ActorSystem("xanho")
-    val actor =
-      system.actorOf(props(id, maximumCapacity), s"$cubeClusterPrefix$id")
+    system.actorOf(props(id, maximumCapacity), s"$cubeClusterPrefix$id")
   }
 
   object Messages {
 
-    case class Register(cubeIds: Set[String])
-
-    case class Unregister(cubeIds: Set[String])
-
-    case object UnregisterAll
-
-    case class Status(cubeIds: Set[String])
+    case class Status(cubeIds: Set[String]) extends ActorMessage
 
   }
 

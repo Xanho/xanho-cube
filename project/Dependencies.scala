@@ -1,9 +1,14 @@
+import org.scalajs.sbtplugin.ScalaJSPlugin.autoImport._
 import sbt._
 
 object Dependencies {
 
   object versions {
     val play = "2.5.10"
+    val udashVersion = "0.4.0"
+    val udashJQueryVersion = "1.0.0"
+    val logbackVersion = "1.1.3"
+    val upickleVersion = "0.4.3"
   }
 
   val playJson =
@@ -32,18 +37,22 @@ object Dependencies {
       "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0"
     )
 
-  val akka =
+  val akka = {
+    val version = "2.4.16"
     Seq(
-      "com.typesafe.akka" %% "akka-actor" % "2.4.16",
-      "com.typesafe.akka" %% "akka-remote" % "2.4.16"
+      "com.typesafe.akka" %% "akka-actor" % version,
+      "com.typesafe.akka" %% "akka-remote" % version,
+      "com.typesafe.akka" %% "akka-persistence" % version
     )
+  }
 
   val akkaHttp = {
     val version = "10.0.0"
     Seq(
       "com.typesafe.akka" %% "akka-http" % version,
       "com.typesafe.akka" %% "akka-http-testkit" % version,
-      "de.heikoseeberger" %% "akka-http-play-json" % "1.10.1"
+      "de.heikoseeberger" %% "akka-http-play-json" % "1.10.1",
+      "com.lihaoyi" %% "upickle" % versions.upickleVersion
     )
   }
 
@@ -68,5 +77,39 @@ object Dependencies {
     Seq(
       "com.google.firebase" % "firebase-admin" % "4.0.3"
     )
+
+  val storage =
+    Seq(
+      "com.seancheatham" %% "storage-firebase" % "0.0.1"
+    )
+
+  val journal =
+    Seq(
+      "com.seancheatham" %% "firebase-persistence" % "0.0.2"
+    )
+
+  val crossDeps =
+    Def.setting(
+      Seq[ModuleID](
+        "io.udash" %%% "udash-core-shared" % versions.udashVersion,
+        "io.udash" %%% "udash-rpc-shared" % versions.udashVersion,
+        "com.lihaoyi" %%% "upickle" % versions.upickleVersion
+      )
+    )
+
+  val frontendDeps =
+    Def.setting(
+      Seq[ModuleID](
+        "io.udash" %%% "udash-core-frontend" % versions.udashVersion,
+        "io.udash" %%% "udash-jquery" % versions.udashJQueryVersion,
+        "io.udash" %%% "udash-rpc-frontend" % versions.udashVersion,
+        "com.github.japgolly.scalacss" %%% "core" % "0.5.0",
+        "com.github.japgolly.scalacss" %%% "ext-scalatags" % "0.5.0",
+        "eu.unicredit" %%% "shocon" % "0.1.7"
+      )
+    )
+
+  val frontendJSDeps =
+    Def.setting(Seq[org.scalajs.sbtplugin.JSModuleID]())
 
 }
